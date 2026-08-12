@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import ReactMarkdown from 'react-markdown';
 import { auth, isFirebaseConfigured } from './firebase';
 import AuthPage from './components/AuthPage';
-import { useVoiceRecognition } from './hooks/useVoiceRecognition';
+import { useAudioCapture } from './hooks/useAudioCapture';
 import * as firestoreApi from './services/firestore';
 import { generateChatResponse, buildHeading } from './services/api';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
@@ -96,6 +96,7 @@ export default function App() {
   const loadingRef = useRef(false);
   const userRef = useRef(null);
   const resetTranscriptRef = useRef(() => {});
+  const stopListeningRef = useRef(() => {});
 
   useEffect(() => {
     sessionRef.current = session;
@@ -166,7 +167,7 @@ export default function App() {
       setLastResponse(saved);
       if (!overridePrompt) setPrompt('');
       resetTranscriptRef.current();
-      await firestoreApi.updateSessionTimestamp(userRef.current.uid, sessionRef.current.id);
+      firestoreApi.updateSessionTimestamp(userRef.current.uid, sessionRef.current.id).catch(() => {});
     } catch (err) {
       alert(err.message);
     } finally {
@@ -182,22 +183,26 @@ export default function App() {
 
   const {
     isListening,
-    isSupported,
-    displayText,
+    isSupported: audioSupported,
+    displayText: voiceDisplayText,
     toggleListening,
+    stopListening,
     resetTranscript,
-  } = useVoiceRecognition({
+  } = useAudioCapture({
     onFinalTranscript: handleVoiceTranscript,
-    autoSendDelay: 2000,
+    autoSendDelay: 1400,
   });
 
   resetTranscriptRef.current = resetTranscript;
+  stopListeningRef.current = stopListening;
 
   useEffect(() => {
-    if (isListening && displayText) {
-      setPrompt(displayText);
+    if (isListening && voiceDisplayText) {
+      setPrompt(voiceDisplayText);
     }
-  }, [displayText, isListening]);
+  }, [voiceDisplayText, isListening]);
+
+  useEffect(() => () => stopListeningRef.current(), []);
 
   const handleFixedQuestion = async (question) => {
     setShowFixedModal(false);
@@ -238,6 +243,7 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    stopListeningRef.current();
     await signOut(auth);
     setSession(null);
     setResponses([]);
@@ -262,13 +268,17 @@ export default function App() {
           <span className="session-info">Session joined: {session.userName}</span>
         </div>
         <div className="header-right">
-          {isSupported && (
+          {audioSupported && (
             <button
               className={`voice-btn ${isListening ? 'active' : ''}`}
               onClick={toggleListening}
-              title={isListening ? 'Stop listening' : 'Start voice detection'}
+              title={
+                isListening
+                  ? 'Stop listening'
+                  : 'Listen to microphone and system audio (share a tab with audio for YouTube, Meet, etc.)'
+              }
             >
-              {isListening ? '🔴 Listening...' : '🎤 Voice Off'}
+              {isListening ? '🔴 Listening' : '🎧 Listen'}
             </button>
           )}
           <button className="voice-btn" onClick={handleSignOut} title="Sign out">Sign Out</button>
@@ -319,8 +329,8 @@ export default function App() {
             {responses.length === 0 && (
               <div className="empty-state">
                 {isListening
-                  ? 'Listening for interview questions... Speak and pause to auto-generate a response.'
-                  : 'Enable voice detection or type a prompt and click Send.'}
+                  ? 'Listening to microphone and system audio... When speech pauses, a response is generated automatically.'
+                  : 'Click Listen to capture microphone and/or tab audio (YouTube, Google Meet, etc.), or type a prompt and click Send.'}
               </div>
             )}
             {responses.map((item) => (

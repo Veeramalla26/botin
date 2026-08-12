@@ -37,12 +37,14 @@ module.exports = async (req, res) => {
     const systemPrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.send;
     const userMessage = buildUserMessage(prompt, mode, { questionText, previousResponse });
 
+    const maxTokens = mode === 'brief' ? 600 : mode === 'send' ? 900 : 1200;
+
     const { text } = await generateText({
       model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
       system: systemPrompt,
       prompt: userMessage,
-      temperature: 0.7,
-      maxTokens: 1500,
+      temperature: 0.65,
+      maxTokens,
     });
 
     return res.status(200).send(text);
