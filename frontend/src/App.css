@@ -1,0 +1,388 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f5f5f0;
+  color: #333;
+}
+
+/* Setup overlay */
+.setup-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: #2d6a6a;
+}
+
+.setup-form {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.setup-form h2 {
+  text-align: center;
+  color: #2d6a6a;
+}
+
+.setup-form input {
+  padding: 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.setup-form button {
+  padding: 0.75rem;
+  background: #2d6a6a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.setup-form button:hover {
+  background: #245656;
+}
+
+.auth-subtitle {
+  text-align: center;
+  color: #666;
+  font-size: 0.9rem;
+  margin-top: -0.5rem;
+}
+
+.auth-error {
+  background: #fdecea;
+  color: #c0392b;
+  padding: 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.auth-toggle {
+  background: transparent !important;
+  color: #2d6a6a !important;
+  border: 1px solid #2d6a6a !important;
+  margin-top: 0.25rem;
+}
+
+.auth-toggle:hover {
+  background: #e8f4f4 !important;
+}
+
+/* Header */
+.header {
+  background: #2d6a6a;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-left h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.session-info {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.voice-btn {
+  padding: 0.4rem 0.8rem;
+  border: 2px solid rgba(255,255,255,0.5);
+  border-radius: 20px;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.voice-btn.active {
+  background: rgba(255, 0, 0, 0.3);
+  border-color: #ff4444;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+/* Main layout */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 0;
+  height: calc(100vh - 60px);
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.left-panel, .right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.left-panel label, .right-panel > label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* Prompt section */
+.prompt-section, .notes-section {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.prompt-section {
+  flex: 1;
+}
+
+.notes-section {
+  flex: 0 0 auto;
+}
+
+textarea {
+  width: 100%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #2d6a6a;
+}
+
+/* Buttons */
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+.btn {
+  padding: 0.45rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btn.reset { background: #e8837a; }
+.btn.clear { background: #d9534f; }
+.btn.send { background: #2d6a6a; }
+.btn.elaborate { background: #2d6a6a; }
+.btn.resume { background: #5cb85c; }
+.btn.fixed { background: #5bc0de; }
+.btn.system-design { background: #5cb85c; }
+.btn.brief { background: #5cb85c; }
+.btn.code { background: #5cb85c; }
+.btn.regenerate { background: #2d6a6a; }
+.btn.clear-all { background: #5bc0de; }
+
+.session-label {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.25rem;
+}
+
+/* Response panel */
+.right-panel {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.response-feed {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.empty-state {
+  color: #999;
+  text-align: center;
+  padding: 2rem;
+  font-style: italic;
+}
+
+.response-item {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #eee;
+}
+
+.response-heading {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.response-body {
+  line-height: 1.6;
+  font-size: 0.9rem;
+}
+
+.response-body strong {
+  font-weight: 700;
+}
+
+.response-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.2rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.icon-btn:hover {
+  opacity: 1;
+}
+
+.response-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.response-footer .btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  width: 500px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.modal h3 {
+  margin-bottom: 1rem;
+  color: #2d6a6a;
+}
+
+.question-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.question-item {
+  text-align: left;
+  padding: 0.75rem;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.question-item:hover {
+  background: #e8f4f4;
+  border-color: #2d6a6a;
+}
+
+.q-num {
+  font-weight: 700;
+  color: #2d6a6a;
+}
+
+.btn-close-modal {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: #888;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .main {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
