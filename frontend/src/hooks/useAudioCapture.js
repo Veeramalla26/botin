@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { transcribeAudio } from '../services/api';
+import { blobToWav } from '../utils/audioWav';
 
-const SPEECH_THRESHOLD = 18;
-const CHECK_INTERVAL_MS = 120;
-const MIN_SPEECH_MS = 600;
-const MIN_TEXT_LENGTH = 8;
+const MIC_ARM_THRESHOLD = 0.006;
+const MIC_SPEECH_THRESHOLD = 0.011;
+const SYSTEM_ARM_THRESHOLD = 0.005;
+const SYSTEM_SPEECH_THRESHOLD = 0.008;
+const CHECK_INTERVAL_MS = 50;
+const MIN_SPEECH_MS = 800;
+const MIN_TEXT_LENGTH = 3;
+const SYSTEM_GAIN = 2.5;
 
 function getSupportedMimeType() {
   if (typeof MediaRecorder === 'undefined') return null;
@@ -17,23 +22,42 @@ function getSupportedMimeType() {
   return null;
 }
 
-export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
-  const [isListening, setIsListening] = useState(false);
+function getRmsVolume(analyser) {
+  if (!analyser) return 0;
+
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    const sample = (data[i] - 128) / 128;
+    sum += sample * sample;
+  }
+
+  return Math.sqrt(sum / data.length);
+}
+
+
+export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, systemSilenceDelay = 1300 }) {
+  const [captureMode, setCaptureMode] = useState('');
   const [displayText, setDisplayText] = useState('');
   const [statusHint, setStatusHint] = useState('');
   const [isSupported, setIsSupported] = useState(false);
 
   const streamsRef = useRef([]);
   const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
+  const activeAnalyserRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
+  const segmentChunksRef = useRef([]);
   const checkIntervalRef = useRef(null);
+  const modeRef = useRef('');
   const listeningRef = useRef(false);
   const isSpeakingRef = useRef(false);
   const speechStartedAtRef = useRef(0);
   const silenceStartedAtRef = useRef(null);
   const processingRef = useRef(false);
+  const skipProcessRef = useRef(false);
+  const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
 
   useEffect(() => {
@@ -49,6 +73,21 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
     );
   }, []);
 
+  const getThresholds = useCallback(() => {
+    if (modeRef.current === 'system') {
+      return { arm: SYSTEM_ARM_THRESHOLD, speech: SYSTEM_SPEECH_THRESHOLD };
+    }
+    return { arm: MIC_ARM_THRESHOLD, speech: MIC_SPEECH_THRESHOLD };
+  }, []);
+
+  const armRecorder = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'inactive') {
+      segmentChunksRef.current = [];
+      recorder.start(200);
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
     if (checkIntervalRef.current) {
       clearInterval(checkIntervalRef.current);
@@ -57,6 +96,7 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
+        skipProcessRef.current = true;
         mediaRecorderRef.current.stop();
       } catch {
         /* ignore */
@@ -74,46 +114,68 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
       audioContextRef.current = null;
     }
 
-    analyserRef.current = null;
-    chunksRef.current = [];
+    activeAnalyserRef.current = null;
+    segmentChunksRef.current = [];
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
     listeningRef.current = false;
-    setIsListening(false);
+    modeRef.current = '';
+    setCaptureMode('');
     setDisplayText('');
     setStatusHint('');
   }, []);
 
-  const getAverageVolume = useCallback(() => {
-    const analyser = analyserRef.current;
-    if (!analyser) return 0;
-
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(data);
-    return data.reduce((sum, value) => sum + value, 0) / data.length;
-  }, []);
-
   const processRecording = useCallback(async () => {
-    if (processingRef.current || !chunksRef.current.length) return;
+    if (processingRef.current || skipProcessRef.current) {
+      skipProcessRef.current = false;
+      segmentChunksRef.current = [];
+      return;
+    }
+
+    if (!segmentChunksRef.current.length) return;
 
     processingRef.current = true;
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-    chunksRef.current = [];
+    const webmBlob = new Blob(segmentChunksRef.current, { type: 'audio/webm' });
+    segmentChunksRef.current = [];
+
+    if (webmBlob.size < 2500) {
+      processingRef.current = false;
+      return;
+    }
 
     try {
       setStatusHint('Transcribing...');
-      const text = await transcribeAudio(blob);
-      if (text && text.length >= MIN_TEXT_LENGTH && onFinalTranscriptRef.current) {
+
+      let uploadBlob = webmBlob;
+      let mimeType = 'audio/webm';
+
+      if (audioContextRef.current) {
+        try {
+          uploadBlob = await blobToWav(webmBlob, audioContextRef.current);
+          mimeType = 'audio/wav';
+        } catch (wavErr) {
+          console.warn('WAV conversion failed, using webm:', wavErr);
+        }
+      }
+
+      const text = (await transcribeAudio(uploadBlob, mimeType)).trim();
+
+      if (text.length >= MIN_TEXT_LENGTH && onFinalTranscriptRef.current) {
         setDisplayText(text);
-        await onFinalTranscriptRef.current(text);
+        onFinalTranscriptRef.current(text);
         setDisplayText('');
       }
     } catch (err) {
       console.error('Audio transcription error:', err);
+      setStatusHint('Transcription failed — still listening...');
     } finally {
       processingRef.current = false;
       if (listeningRef.current) {
-        setStatusHint('Listening...');
+        setStatusHint(
+          modeRef.current === 'system'
+            ? 'Listening to tab audio...'
+            : 'Listening to microphone...'
+        );
       }
     }
   }, []);
@@ -124,7 +186,8 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
     silenceStartedAtRef.current = null;
 
     if (duration < MIN_SPEECH_MS) {
-      chunksRef.current = [];
+      skipProcessRef.current = true;
+      segmentChunksRef.current = [];
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
@@ -133,30 +196,32 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
 
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
-    } else {
-      processRecording();
-    }
-  }, [processRecording]);
-
-  const startSpeechSegment = useCallback(() => {
-    isSpeakingRef.current = true;
-    speechStartedAtRef.current = Date.now();
-    silenceStartedAtRef.current = null;
-    chunksRef.current = [];
-    setDisplayText('Speech detected...');
-
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state === 'inactive') {
-      recorder.start(250);
     }
   }, []);
 
-  const monitorAudio = useCallback(() => {
-    const volume = getAverageVolume();
-    const speaking = volume > SPEECH_THRESHOLD;
+  const startSpeechSegment = useCallback(() => {
+    isSpeakingRef.current = true;
+    if (!speechStartedAtRef.current) {
+      speechStartedAtRef.current = Date.now();
+    }
+    silenceStartedAtRef.current = null;
+    setDisplayText('Speech detected...');
+    armRecorder();
+  }, [armRecorder]);
 
-    if (speaking) {
+  const monitorAudio = useCallback(() => {
+    const level = getRmsVolume(activeAnalyserRef.current);
+    if (!activeAnalyserRef.current) return;
+
+    const { arm, speech } = getThresholds();
+
+    if (level > arm) {
+      armRecorder();
+    }
+
+    if (level > speech) {
       if (!isSpeakingRef.current) {
+        speechStartedAtRef.current = Date.now();
         startSpeechSegment();
       } else {
         silenceStartedAtRef.current = null;
@@ -171,161 +236,199 @@ export function useAudioCapture({ onFinalTranscript, autoSendDelay = 1400 }) {
       return;
     }
 
-    if (Date.now() - silenceStartedAtRef.current >= autoSendDelay) {
+    if (Date.now() - silenceStartedAtRef.current >= silenceDelayRef.current) {
       finishSpeechSegment();
     }
-  }, [autoSendDelay, finishSpeechSegment, getAverageVolume, startSpeechSegment]);
+  }, [armRecorder, finishSpeechSegment, getThresholds, startSpeechSegment]);
 
-  const connectSource = useCallback((audioContext, stream, destination, analyser) => {
+  const connectStream = useCallback((audioContext, stream, destination, analyser, gainValue = 1) => {
     const source = audioContext.createMediaStreamSource(stream);
-    source.connect(destination);
-    source.connect(analyser);
+    const gain = audioContext.createGain();
+    gain.gain.value = gainValue;
+    source.connect(gain);
+    gain.connect(destination);
+    gain.connect(analyser);
   }, []);
 
-  const startListening = useCallback(async () => {
-    if (!isSupported || listeningRef.current) return;
+  const beginCapture = useCallback(
+    async (mode, stream, gainValue, statusMessage) => {
+      const mimeType = getSupportedMimeType();
+      const audioContext = new AudioContext({ sampleRate: 48000 });
+      await audioContext.resume();
 
-    const mimeType = getSupportedMimeType();
-    if (!mimeType) {
-      alert('Audio recording is not supported in this browser.');
-      return;
+      const destination = audioContext.createMediaStreamDestination();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
+
+      connectStream(audioContext, stream, destination, analyser, gainValue);
+
+      audioContextRef.current = audioContext;
+      activeAnalyserRef.current = analyser;
+
+      const recorder = new MediaRecorder(destination.stream, {
+        mimeType,
+        audioBitsPerSecond: 128000,
+      });
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          segmentChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        processRecording();
+      };
+
+      mediaRecorderRef.current = recorder;
+      checkIntervalRef.current = setInterval(monitorAudio, CHECK_INTERVAL_MS);
+      listeningRef.current = true;
+      modeRef.current = mode;
+      silenceDelayRef.current = mode === 'system' ? systemSilenceDelay : micSilenceDelay;
+      setCaptureMode(mode);
+      setStatusHint(statusMessage);
+    },
+    [connectStream, micSilenceDelay, monitorAudio, processRecording, systemSilenceDelay]
+  );
+
+  const startMicListening = useCallback(async () => {
+    if (!isSupported) return;
+    if (listeningRef.current) {
+      cleanup();
+      if (modeRef.current === 'mic') return;
     }
 
-    let micStream = null;
-    let displayStream = null;
-
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({
+      const micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1,
         },
       });
+
+      streamsRef.current.push(micStream);
+      await beginCapture('mic', micStream, 1, 'Listening to microphone...');
     } catch (err) {
-      console.warn('Microphone access unavailable:', err);
+      console.error('Microphone error:', err);
+      cleanup();
+      alert('Microphone access denied. Allow microphone permission and try again.');
+    }
+  }, [beginCapture, cleanup, isSupported]);
+
+  const startSystemListening = useCallback(async () => {
+    if (!isSupported || !navigator.mediaDevices.getDisplayMedia) {
+      alert('System/tab audio requires Chrome or Edge.');
+      return;
     }
 
-    if (navigator.mediaDevices.getDisplayMedia) {
-      try {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-          preferCurrentTab: false,
-        });
-      } catch (err) {
-        console.warn('System/tab audio capture unavailable:', err);
-      }
+    if (listeningRef.current) {
+      cleanup();
+      if (modeRef.current === 'system') return;
     }
 
-    const hasMic = !!micStream?.getAudioTracks().length;
-    const systemTracks = displayStream?.getAudioTracks() || [];
-    const hasSystem = systemTracks.length > 0;
+    let displayStream = null;
 
-    if (!hasMic && !hasSystem) {
-      micStream?.getTracks().forEach((track) => track.stop());
-      displayStream?.getTracks().forEach((track) => track.stop());
+    try {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'browser',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 5 },
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          suppressLocalAudioPlayback: false,
+        },
+        preferCurrentTab: false,
+        selfBrowserSurface: 'exclude',
+        systemAudio: 'include',
+      });
+    } catch (err) {
+      console.warn('Tab audio capture cancelled:', err);
+      return;
+    }
+
+    const audioTracks = displayStream.getAudioTracks();
+    if (!audioTracks.length) {
+      displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No audio source available. Allow microphone access and/or share a browser tab with "Share tab audio" enabled (YouTube, Google Meet, etc.).'
+        'No tab audio detected.\n\nPick a Chrome tab (YouTube, Google Meet, etc.) and turn ON "Share tab audio" before clicking Share.'
       );
       return;
     }
 
-    if (displayStream) {
-      displayStream.getVideoTracks().forEach((track) => {
-        track.enabled = false;
-      });
-    }
-
-    const audioContext = new AudioContext();
-    await audioContext.resume();
-
-    const destination = audioContext.createMediaStreamDestination();
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-
-    if (hasMic) {
-      connectSource(audioContext, micStream, destination, analyser);
-      streamsRef.current.push(micStream);
-    }
-
-    if (hasSystem) {
-      connectSource(
-        audioContext,
-        new MediaStream(systemTracks),
-        destination,
-        analyser
-      );
-      streamsRef.current.push(displayStream);
-      systemTracks.forEach((track) => {
-        track.onended = () => cleanup();
-      });
-    }
-
-    if (displayStream && !hasSystem) {
-      displayStream.getTracks().forEach((track) => track.stop());
-    }
-
-    audioContextRef.current = audioContext;
-    analyserRef.current = analyser;
-
-    const recorder = new MediaRecorder(destination.stream, {
-      mimeType,
-      audioBitsPerSecond: 64000,
+    displayStream.getVideoTracks().forEach((track) => {
+      track.enabled = false;
+      track.onended = () => cleanup();
     });
 
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunksRef.current.push(event.data);
-      }
-    };
+    audioTracks.forEach((track) => {
+      track.onended = () => cleanup();
+    });
 
-    recorder.onstop = () => {
-      processRecording();
-    };
+    streamsRef.current.push(displayStream);
 
-    mediaRecorderRef.current = recorder;
-    checkIntervalRef.current = setInterval(monitorAudio, CHECK_INTERVAL_MS);
-    listeningRef.current = true;
-    setIsListening(true);
+    const systemStream = new MediaStream([...audioTracks]);
 
-    if (hasMic && hasSystem) {
-      setStatusHint('Listening to microphone and system audio...');
-    } else if (hasMic) {
-      setStatusHint('Listening to microphone...');
-    } else {
-      setStatusHint('Listening to system audio...');
-    }
-  }, [cleanup, connectSource, isSupported, monitorAudio, processRecording]);
+    await beginCapture(
+      'system',
+      systemStream,
+      SYSTEM_GAIN,
+      'Listening to tab audio (Meet, YouTube, etc.)...'
+    );
+  }, [beginCapture, cleanup, isSupported]);
 
   const stopListening = useCallback(() => {
     cleanup();
   }, [cleanup]);
 
-  const toggleListening = useCallback(() => {
-    if (listeningRef.current) {
+  const toggleMicListening = useCallback(() => {
+    if (listeningRef.current && modeRef.current === 'mic') {
       stopListening();
     } else {
-      startListening();
+      startMicListening();
     }
-  }, [startListening, stopListening]);
+  }, [startMicListening, stopListening]);
+
+  const toggleSystemListening = useCallback(() => {
+    if (listeningRef.current && modeRef.current === 'system') {
+      stopListening();
+    } else {
+      startSystemListening();
+    }
+  }, [startSystemListening, stopListening]);
 
   const resetTranscript = useCallback(() => {
     setDisplayText('');
-    setStatusHint(listeningRef.current ? 'Listening...' : '');
+    if (listeningRef.current) {
+      setStatusHint(
+        modeRef.current === 'system'
+          ? 'Listening to tab audio...'
+          : 'Listening to microphone...'
+      );
+    } else {
+      setStatusHint('');
+    }
   }, []);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
   return {
-    isListening,
+    isListening: captureMode !== '',
+    isMicListening: captureMode === 'mic',
+    isSystemListening: captureMode === 'system',
+    captureMode,
     isSupported,
     displayText: statusHint || displayText,
-    toggleListening,
+    toggleMicListening,
+    toggleSystemListening,
     stopListening,
     resetTranscript,
   };

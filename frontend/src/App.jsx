@@ -128,7 +128,7 @@ export default function App() {
 
     const unsub = firestoreApi.subscribeToResponses(user.uid, session.id, (items) => {
       setResponses(items);
-      if (items.length) setLastResponse(items[items.length - 1]);
+      if (items.length) setLastResponse(items[0]);
     });
 
     firestoreApi.getNotes(user.uid, session.id).then((data) => {
@@ -176,21 +176,33 @@ export default function App() {
   };
 
   const handleVoiceTranscript = useCallback(async (text) => {
-    if (!sessionRef.current || !userRef.current || loadingRef.current) return;
-    setPrompt(text);
-    await handleGenerate('send', text);
+    if (!sessionRef.current || !userRef.current) return;
+
+    const cleaned = text.trim();
+    if (cleaned.length < 3) return;
+
+    setPrompt(cleaned);
+
+    if (loadingRef.current) {
+      return;
+    }
+
+    handleGenerate('send', cleaned);
   }, [lastResponse]);
 
   const {
     isListening,
-    isSupported: audioSupported,
+    isMicListening,
+    isSystemListening,
     displayText: voiceDisplayText,
-    toggleListening,
+    toggleMicListening,
+    toggleSystemListening,
     stopListening,
     resetTranscript,
   } = useAudioCapture({
     onFinalTranscript: handleVoiceTranscript,
-    autoSendDelay: 1400,
+    micSilenceDelay: 900,
+    systemSilenceDelay: 1100,
   });
 
   resetTranscriptRef.current = resetTranscript;
@@ -268,19 +280,24 @@ export default function App() {
           <span className="session-info">Session joined: {session.userName}</span>
         </div>
         <div className="header-right">
-          {audioSupported && (
-            <button
-              className={`voice-btn ${isListening ? 'active' : ''}`}
-              onClick={toggleListening}
-              title={
-                isListening
-                  ? 'Stop listening'
-                  : 'Listen to microphone and system audio (share a tab with audio for YouTube, Meet, etc.)'
-              }
-            >
-              {isListening ? '🔴 Listening' : '🎧 Listen'}
-            </button>
-          )}
+          <button
+            className={`voice-btn ${isMicListening ? 'active' : ''}`}
+            onClick={toggleMicListening}
+            title={isMicListening ? 'Stop microphone' : 'Listen to your microphone'}
+          >
+            {isMicListening ? '🔴 Listening' : '🎤 Listen'}
+          </button>
+          <button
+            className={`voice-btn meet-btn ${isSystemListening ? 'active' : ''}`}
+            onClick={toggleSystemListening}
+            title={
+              isSystemListening
+                ? 'Stop tab audio'
+                : 'Capture tab audio — share YouTube, Google Meet, etc. with "Share tab audio" on'
+            }
+          >
+            {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
+          </button>
           <button className="voice-btn" onClick={handleSignOut} title="Sign out">Sign Out</button>
           <div className="avatar">👤</div>
         </div>
@@ -328,9 +345,11 @@ export default function App() {
           <div className="response-feed">
             {responses.length === 0 && (
               <div className="empty-state">
-                {isListening
-                  ? 'Listening to microphone and system audio... When speech pauses, a response is generated automatically.'
-                  : 'Click Listen to capture microphone and/or tab audio (YouTube, Google Meet, etc.), or type a prompt and click Send.'}
+                {isSystemListening
+                  ? 'System Listen is active — tab audio from Google Meet / YouTube is transcribed when speech pauses.'
+                  : isMicListening
+                    ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
+                    : 'Click Listen for microphone, or System Listen and share a tab with audio enabled (Google Meet, YouTube, etc.).'}
               </div>
             )}
             {responses.map((item) => (

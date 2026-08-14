@@ -27,16 +27,19 @@ module.exports = async (req, res) => {
     }
 
     const buffer = Buffer.from(audio, 'base64');
-    if (buffer.length < 1000) {
+    if (buffer.length < 2000) {
       return res.status(200).json({ text: '' });
     }
 
+    const isWav = mimeType.includes('wav');
+    const filename = isWav ? 'speech.wav' : 'speech.webm';
+
     const formData = new FormData();
-    const blob = new Blob([buffer], { type: mimeType });
-    formData.append('file', blob, 'meet-audio.webm');
+    formData.append('file', new Blob([buffer], { type: isWav ? 'audio/wav' : mimeType }), filename);
     formData.append('model', 'whisper-1');
     formData.append('language', 'en');
     formData.append('response_format', 'json');
+    formData.append('temperature', '0');
 
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -53,7 +56,8 @@ module.exports = async (req, res) => {
     }
 
     const data = await response.json();
-    return res.status(200).json({ text: (data.text || '').trim() });
+    const text = (data.text || '').trim();
+    return res.status(200).json({ text });
   } catch (err) {
     console.error('Transcribe API error:', err);
     return res.status(500).json({ error: err.message || 'Failed to transcribe audio' });

@@ -75,7 +75,7 @@ export async function clearResponses(userId, sessionId) {
 }
 
 export function subscribeToResponses(userId, sessionId, callback) {
-  const q = query(responsesPath(userId, sessionId), orderBy('createdAt', 'asc'));
+  const q = query(responsesPath(userId, sessionId), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snapshot) => {
     const items = snapshot.docs.map((d) => ({
       id: d.id,

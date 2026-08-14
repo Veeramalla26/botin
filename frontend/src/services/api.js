@@ -1,18 +1,19 @@
 const API_BASE = '/api';
 
-export async function transcribeAudio(blob) {
+export async function transcribeAudio(blob, mimeType = 'audio/webm') {
   const buffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
   const audio = btoa(binary);
 
   const res = await fetch(`${API_BASE}/transcribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio, mimeType: blob.type || 'audio/webm' }),
+    body: JSON.stringify({ audio, mimeType: mimeType || blob.type || 'audio/webm' }),
   });
 
   if (!res.ok) {
