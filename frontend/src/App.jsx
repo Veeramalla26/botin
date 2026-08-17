@@ -5,7 +5,7 @@ import { auth, isFirebaseConfigured } from './firebase';
 import AuthPage from './components/AuthPage';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import * as firestoreApi from './services/firestore';
-import { generateChatResponse, buildHeading } from './services/api';
+import { streamChatResponse, buildHeading } from './services/api';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -65,18 +65,30 @@ function FixedQuestionModal({ questions, onSelect, onClose }) {
   );
 }
 
-function ResponseItem({ item, onDelete, onAddToNotes, onCopy }) {
+const markdownComponents = {
+  strong: ({ children }) => <strong className="keyword">{children}</strong>,
+  p: ({ children }) => <p className="response-paragraph">{children}</p>,
+};
+
+function ResponseItem({ item, onDelete, onAddToNotes, onCopy, isStreaming = false }) {
   return (
-    <div className="response-item">
+    <div className={`response-item${isStreaming ? ' streaming' : ''}`}>
       <div className="response-heading">{item.heading || item.prompt}</div>
       <div className="response-body">
-        <ReactMarkdown>{item.response}</ReactMarkdown>
+        {item.response ? (
+          <ReactMarkdown components={markdownComponents}>{item.response}</ReactMarkdown>
+        ) : isStreaming ? (
+          <span className="streaming-placeholder">Generating answer...</span>
+        ) : null}
+        {isStreaming && item.response && <span className="streaming-cursor" aria-hidden="true" />}
       </div>
-      <div className="response-actions">
-        <button className="icon-btn delete" onClick={() => onDelete(item.id)} title="Delete">🗑</button>
-        <button className="icon-btn add" onClick={() => onAddToNotes(item.response)} title="Add to Notes">+</button>
-        <button className="icon-btn copy" onClick={() => onCopy(item.response)} title="Copy">📋</button>
-      </div>
+      {!isStreaming && (
+        <div className="response-actions">
+          <button className="icon-btn delete" onClick={() => onDelete(item.id)} title="Delete">🗑</button>
+          <button className="icon-btn add" onClick={() => onAddToNotes(item.response)} title="Add to Notes">+</button>
+          <button className="icon-btn copy" onClick={() => onCopy(item.response)} title="Copy">📋</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -91,12 +103,23 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [showFixedModal, setShowFixedModal] = useState(false);
   const [lastResponse, setLastResponse] = useState(null);
+  const [streamingResponse, setStreamingResponse] = useState(null);
   const notesTimerRef = useRef(null);
   const sessionRef = useRef(null);
   const loadingRef = useRef(false);
   const userRef = useRef(null);
   const resetTranscriptRef = useRef(() => {});
   const stopListeningRef = useRef(() => {});
+  const responsesRef = useRef([]);
+  const lastResponseRef = useRef(null);
+
+  useEffect(() => {
+    responsesRef.current = responses;
+  }, [responses]);
+
+  useEffect(() => {
+    lastResponseRef.current = lastResponse;
+  }, [lastResponse]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -138,25 +161,80 @@ export default function App() {
     return unsub;
   }, [user, session]);
 
+  const handlePromptKeyDown = (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    if (!loading && prompt.trim()) {
+      handleGenerate('send');
+    }
+  };
+
   const handleJoin = async (userName, company) => {
     const sess = await firestoreApi.createSession(user.uid, userName, company);
     setSession(sess);
+  };
+
+  const buildConversationHistory = () => {
+    const turns = [];
+    const seen = new Set();
+
+    const last = lastResponseRef.current;
+    if (last?.response && (last.prompt || last.heading)) {
+      turns.push({
+        prompt: last.prompt || last.heading,
+        response: last.response.slice(0, 1000),
+      });
+      seen.add(last.id);
+    }
+
+    for (const item of responsesRef.current) {
+      if (seen.has(item.id) || turns.length >= 3) continue;
+      if (item.response && (item.prompt || item.heading)) {
+        turns.push({
+          prompt: item.prompt || item.heading,
+          response: item.response.slice(0, 1000),
+        });
+        seen.add(item.id);
+      }
+    }
+
+    return turns.reverse();
   };
 
   const handleGenerate = async (mode, overridePrompt, questionText) => {
     const text = (overridePrompt ?? prompt).trim();
     if ((!text && !questionText) || !sessionRef.current || !userRef.current || loadingRef.current) return;
 
-    setLoading(true);
-    try {
-      const responseText = await generateChatResponse({
-        prompt: text,
-        mode,
-        questionText,
-        previousResponse: mode === 'elaborate' ? lastResponse?.response : undefined,
-      });
+    const heading = buildHeading(text, mode, questionText);
+    const streamId = `stream-${Date.now()}`;
 
-      const heading = buildHeading(text, mode, questionText);
+    setLoading(true);
+    setStreamingResponse({
+      id: streamId,
+      heading,
+      response: '',
+      mode,
+      prompt: text || questionText,
+    });
+
+    try {
+      const conversationHistory = buildConversationHistory();
+
+      const responseText = await streamChatResponse(
+        {
+          prompt: text,
+          mode,
+          questionText,
+          previousResponse: mode === 'elaborate' ? lastResponse?.response : undefined,
+          conversationHistory: mode === 'elaborate' ? undefined : conversationHistory,
+        },
+        (partial) => {
+          setStreamingResponse((prev) =>
+            prev?.id === streamId ? { ...prev, response: partial } : prev
+          );
+        }
+      );
+
       const saved = await firestoreApi.saveResponse(userRef.current.uid, sessionRef.current.id, {
         prompt: text || questionText,
         response: responseText,
@@ -171,6 +249,7 @@ export default function App() {
     } catch (err) {
       alert(err.message);
     } finally {
+      setStreamingResponse(null);
       setLoading(false);
     }
   };
@@ -310,14 +389,15 @@ export default function App() {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handlePromptKeyDown}
               placeholder="Type your prompt here or use voice detection..."
-              rows={8}
+              rows={5}
             />
             <div className="button-grid">
               <button className="btn reset" onClick={() => { setPrompt(''); resetTranscript(); }}>Reset</button>
               <button className="btn clear" onClick={() => { setPrompt(''); resetTranscript(); }}>Clear</button>
               <button className="btn send" onClick={() => handleGenerate('send')} disabled={loading}>
-                {loading ? '...' : 'Send'}
+                {loading ? 'Generating...' : 'Send'}
               </button>
               <button className="btn elaborate" onClick={() => handleGenerate('elaborate')} disabled={loading}>Elaborate</button>
               <button className="btn resume" onClick={() => handleGenerate('resume')} disabled={loading}>Resume</button>
@@ -335,7 +415,7 @@ export default function App() {
               value={notes}
               onChange={(e) => handleNotesChange(e.target.value)}
               placeholder="Type notes here"
-              rows={6}
+              rows={3}
             />
           </section>
         </div>
@@ -343,7 +423,7 @@ export default function App() {
         <div className="right-panel">
           <label>Response</label>
           <div className="response-feed">
-            {responses.length === 0 && (
+            {responses.length === 0 && !streamingResponse && (
               <div className="empty-state">
                 {isSystemListening
                   ? 'System Listen is active — tab audio from Google Meet / YouTube is transcribed when speech pauses.'
@@ -351,6 +431,13 @@ export default function App() {
                     ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
                     : 'Click Listen for microphone, or System Listen and share a tab with audio enabled (Google Meet, YouTube, etc.).'}
               </div>
+            )}
+            {streamingResponse && (
+              <ResponseItem
+                key={streamingResponse.id}
+                item={streamingResponse}
+                isStreaming
+              />
             )}
             {responses.map((item) => (
               <ResponseItem

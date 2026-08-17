@@ -32,11 +32,14 @@ export async function transcribeAudio(blob, mimeType = 'audio/webm') {
   return data.text || '';
 }
 
-export async function generateChatResponse({ prompt, mode, questionText, previousResponse }) {
+export async function streamChatResponse(
+  { prompt, mode, questionText, previousResponse, conversationHistory },
+  onChunk
+) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, mode, questionText, previousResponse }),
+    body: JSON.stringify({ prompt, mode, questionText, previousResponse, conversationHistory }),
   });
 
   if (!res.ok) {
@@ -51,13 +54,22 @@ export async function generateChatResponse({ prompt, mode, questionText, previou
     throw new Error(message);
   }
 
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const data = await res.json();
-    return data.response || data.text || '';
+  if (!res.body) {
+    return res.text();
   }
 
-  return res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    onChunk(text);
+  }
+
+  return text;
 }
 
 export function buildHeading(prompt, mode, questionText) {

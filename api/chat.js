@@ -1,6 +1,6 @@
 const { createOpenAI } = require('@ai-sdk/openai');
-const { generateText } = require('ai');
-const { MODE_PROMPTS, buildUserMessage } = require('./lib/prompts');
+const { streamText } = require('ai');
+const { MODE_PROMPTS, buildUserMessage, inferMode, isFollowUpQuestion } = require('./lib/prompts');
 
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -28,28 +28,38 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { prompt, mode = 'send', questionText, previousResponse } = req.body || {};
+    const { prompt, mode = 'send', questionText, previousResponse, conversationHistory } = req.body || {};
 
     if (!prompt && !questionText) {
       return res.status(400).json({ error: 'prompt or questionText is required' });
     }
 
-    const systemPrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.send;
-    const userMessage = buildUserMessage(prompt, mode, { questionText, previousResponse });
+    const effectiveMode = inferMode(prompt, mode);
+    const followUp = isFollowUpQuestion(prompt);
+    const systemPrompt = MODE_PROMPTS[effectiveMode] || MODE_PROMPTS.send;
+    const userMessage = buildUserMessage(prompt, effectiveMode, {
+      questionText,
+      previousResponse,
+      conversationHistory,
+    });
 
-    const maxTokens = mode === 'brief' ? 600 : mode === 'send' ? 900 : 1200;
+    const maxTokens =
+      effectiveMode === 'brief' ? 350 : effectiveMode === 'code' ? 900 : effectiveMode === 'send' ? 500 : 800;
+    const temperature = followUp ? 0.6 : effectiveMode === 'code' ? 0.65 : effectiveMode === 'brief' ? 0.75 : 0.82;
 
-    const { text } = await generateText({
+    const result = streamText({
       model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
       system: systemPrompt,
       prompt: userMessage,
-      temperature: 0.65,
+      temperature,
       maxTokens,
     });
 
-    return res.status(200).send(text);
+    result.pipeTextStreamToResponse(res);
   } catch (err) {
     console.error('Chat API error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to generate response' });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || 'Failed to generate response' });
+    }
   }
 };
