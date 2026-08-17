@@ -3,33 +3,42 @@ const API_BASE = '/api';
 export async function transcribeAudio(blob, mimeType = 'audio/webm') {
   const buffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
+  const chunkSize = 0x10000;
+  const chunks = [];
+
   for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize)));
   }
-  const audio = btoa(binary);
+  const audio = btoa(chunks.join(''));
 
-  const res = await fetch(`${API_BASE}/transcribe`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio, mimeType: mimeType || blob.type || 'audio/webm' }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
 
-  if (!res.ok) {
-    const body = await res.text();
-    let message = 'Transcription failed';
-    try {
-      const err = JSON.parse(body);
-      message = err.error || message;
-    } catch {
-      message = body || message;
+  try {
+    const res = await fetch(`${API_BASE}/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio, mimeType: mimeType || blob.type || 'audio/webm' }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      let message = 'Transcription failed';
+      try {
+        const err = JSON.parse(body);
+        message = err.error || message;
+      } catch {
+        message = body || message;
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
-  }
 
-  const data = await res.json();
-  return data.text || '';
+    const data = await res.json();
+    return data.text || '';
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function streamChatResponse(

@@ -4,6 +4,10 @@ import ReactMarkdown from 'react-markdown';
 import { auth, isFirebaseConfigured } from './firebase';
 import AuthPage from './components/AuthPage';
 import { useAudioCapture } from './hooks/useAudioCapture';
+import { useHideApp } from './hooks/useHideApp';
+import { useFloatingPanel, useResponseSync, markExplicitPanelClose } from './hooks/useFloatingPanel';
+import StealthOverlay from './components/StealthOverlay';
+import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading } from './services/api';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
@@ -93,7 +97,40 @@ function ResponseItem({ item, onDelete, onAddToNotes, onCopy, isStreaming = fals
   );
 }
 
+function FloatWindowApp() {
+  const { remoteState } = useResponseSync(false);
+
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      markExplicitPanelClose();
+      try {
+        const channel = new BroadcastChannel('interview-bot-float-sync');
+        channel.postMessage({ type: 'explicit-close' });
+        channel.close();
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
+  return (
+    <div className="app float-window">
+      <FloatingResponsePanel
+        responses={remoteState?.responses || []}
+        streamingResponse={remoteState?.streamingResponse || null}
+        loading={remoteState?.loading || false}
+        isPopoutWindow
+      />
+    </div>
+  );
+}
+
+export { FloatWindowApp };
+
 export default function App() {
+  const isPopout = new URLSearchParams(window.location.search).get('popout') === '1';
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -270,6 +307,33 @@ export default function App() {
   }, [lastResponse]);
 
   const {
+    hideApp,
+    toggleHideApp,
+    isHidden,
+  } = useHideApp();
+
+  const getSyncPayload = useCallback(
+    () => ({ responses, streamingResponse, loading }),
+    [responses, streamingResponse, loading]
+  );
+
+  const { broadcast } = useResponseSync(true, getSyncPayload);
+
+  const {
+    isOpen: isFloatOpen,
+    isMinimized: isFloatMinimized,
+    openPanel: openFloatPanel,
+    closePanel: closeFloatPanel,
+    setPanelMinimized,
+    renderInPanel,
+    pipWindow,
+  } = useFloatingPanel({ enabled: !isPopout });
+
+  useEffect(() => {
+    broadcast({ responses, streamingResponse, loading });
+  }, [responses, streamingResponse, loading, broadcast]);
+
+  const {
     isListening,
     isMicListening,
     isSystemListening,
@@ -280,8 +344,8 @@ export default function App() {
     resetTranscript,
   } = useAudioCapture({
     onFinalTranscript: handleVoiceTranscript,
-    micSilenceDelay: 900,
-    systemSilenceDelay: 1100,
+    micSilenceDelay: 650,
+    systemSilenceDelay: 800,
   });
 
   resetTranscriptRef.current = resetTranscript;
@@ -352,13 +416,47 @@ export default function App() {
     : new Date().toLocaleDateString();
 
   return (
-    <div className="app">
+    <div className={`app${isPopout ? ' popout' : ''}${isHidden ? ' app-hidden' : ''}`}>
+      {isHidden && <StealthOverlay />}
+      {renderInPanel(
+        <FloatingResponsePanel
+          responses={responses}
+          streamingResponse={streamingResponse}
+          loading={loading}
+          isMinimized={isFloatMinimized}
+          onSetMinimized={setPanelMinimized}
+          onClose={closeFloatPanel}
+          dragWindow={pipWindow}
+        />
+      )}
+      {!isHidden && (
+        <>
       <header className="header">
         <div className="header-left">
-          <h1>Interview Bot</h1>
+          <h1>{isPopout ? 'Notes' : 'Interview Bot'}</h1>
           <span className="session-info">Session joined: {session.userName}</span>
         </div>
         <div className="header-right">
+          <button
+            className={`voice-btn ${hideApp ? 'stealth-active' : ''}`}
+            onClick={toggleHideApp}
+            title={
+              hideApp
+                ? 'Hide App is ON — tab looks like Google Docs (safe for screen share). Click or Ctrl+Shift+H to show app.'
+                : 'Hide App is OFF — click or Ctrl+Shift+H to disguise tab as Google Docs during screen share'
+            }
+          >
+            {hideApp ? '📄 Hide App: ON' : '📄 Hide App: OFF'}
+          </button>
+          {!isPopout && (
+            <button
+              className={`voice-btn ${isFloatOpen ? 'float-active' : ''}`}
+              onClick={isFloatOpen ? closeFloatPanel : openFloatPanel}
+              title="Floating panel — stays visible over Meet and other tabs"
+            >
+              {isFloatOpen ? '✕ Close Panel' : '▣ Response Panel'}
+            </button>
+          )}
           <button
             className={`voice-btn ${isMicListening ? 'active' : ''}`}
             onClick={toggleMicListening}
@@ -464,6 +562,8 @@ export default function App() {
           onSelect={handleFixedQuestion}
           onClose={() => setShowFixedModal(false)}
         />
+      )}
+        </>
       )}
     </div>
   );

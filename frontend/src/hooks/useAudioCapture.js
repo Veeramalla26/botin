@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { transcribeAudio } from '../services/api';
-import { blobToWav } from '../utils/audioWav';
 
 const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
 const SYSTEM_ARM_THRESHOLD = 0.005;
 const SYSTEM_SPEECH_THRESHOLD = 0.008;
-const CHECK_INTERVAL_MS = 50;
-const MIN_SPEECH_MS = 800;
+const CHECK_INTERVAL_MS = 40;
+const MIN_SPEECH_MS = 550;
 const MIN_TEXT_LENGTH = 3;
 const SYSTEM_GAIN = 2.5;
+const RECORDER_BITRATE = 64000;
+const RECORDER_TIMESLICE_MS = 100;
 
 function getSupportedMimeType() {
   if (typeof MediaRecorder === 'undefined') return null;
@@ -59,6 +60,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const skipProcessRef = useRef(false);
   const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
+  const transcriptionQueueRef = useRef([]);
 
   useEffect(() => {
     onFinalTranscriptRef.current = onFinalTranscript;
@@ -84,7 +86,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state === 'inactive') {
       segmentChunksRef.current = [];
-      recorder.start(200);
+      recorder.start(RECORDER_TIMESLICE_MS);
     }
   }, []);
 
@@ -116,6 +118,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
     activeAnalyserRef.current = null;
     segmentChunksRef.current = [];
+    transcriptionQueueRef.current = [];
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
     listeningRef.current = false;
@@ -125,40 +128,17 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     setStatusHint('');
   }, []);
 
-  const processRecording = useCallback(async () => {
-    if (processingRef.current || skipProcessRef.current) {
-      skipProcessRef.current = false;
-      segmentChunksRef.current = [];
-      return;
-    }
+  const drainTranscriptionQueue = useCallback(async () => {
+    if (processingRef.current) return;
 
-    if (!segmentChunksRef.current.length) return;
+    const webmBlob = transcriptionQueueRef.current.shift();
+    if (!webmBlob) return;
 
     processingRef.current = true;
-    const webmBlob = new Blob(segmentChunksRef.current, { type: 'audio/webm' });
-    segmentChunksRef.current = [];
-
-    if (webmBlob.size < 2500) {
-      processingRef.current = false;
-      return;
-    }
 
     try {
       setStatusHint('Transcribing...');
-
-      let uploadBlob = webmBlob;
-      let mimeType = 'audio/webm';
-
-      if (audioContextRef.current) {
-        try {
-          uploadBlob = await blobToWav(webmBlob, audioContextRef.current);
-          mimeType = 'audio/wav';
-        } catch (wavErr) {
-          console.warn('WAV conversion failed, using webm:', wavErr);
-        }
-      }
-
-      const text = (await transcribeAudio(uploadBlob, mimeType)).trim();
+      const text = (await transcribeAudio(webmBlob, 'audio/webm')).trim();
 
       if (text.length >= MIN_TEXT_LENGTH && onFinalTranscriptRef.current) {
         setDisplayText(text);
@@ -170,7 +150,9 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       setStatusHint('Transcription failed — still listening...');
     } finally {
       processingRef.current = false;
-      if (listeningRef.current) {
+      if (transcriptionQueueRef.current.length) {
+        drainTranscriptionQueue();
+      } else if (listeningRef.current) {
         setStatusHint(
           modeRef.current === 'system'
             ? 'Listening to tab audio...'
@@ -179,6 +161,24 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       }
     }
   }, []);
+
+  const enqueueRecording = useCallback(() => {
+    if (skipProcessRef.current) {
+      skipProcessRef.current = false;
+      segmentChunksRef.current = [];
+      return;
+    }
+
+    if (!segmentChunksRef.current.length) return;
+
+    const webmBlob = new Blob(segmentChunksRef.current, { type: 'audio/webm' });
+    segmentChunksRef.current = [];
+
+    if (webmBlob.size < 2000) return;
+
+    transcriptionQueueRef.current.push(webmBlob);
+    drainTranscriptionQueue();
+  }, [drainTranscriptionQueue]);
 
   const finishSpeechSegment = useCallback(() => {
     const duration = Date.now() - speechStartedAtRef.current;
@@ -268,7 +268,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
       const recorder = new MediaRecorder(destination.stream, {
         mimeType,
-        audioBitsPerSecond: 128000,
+        audioBitsPerSecond: RECORDER_BITRATE,
       });
 
       recorder.ondataavailable = (event) => {
@@ -278,7 +278,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       };
 
       recorder.onstop = () => {
-        processRecording();
+        enqueueRecording();
       };
 
       mediaRecorderRef.current = recorder;
@@ -289,7 +289,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       setCaptureMode(mode);
       setStatusHint(statusMessage);
     },
-    [connectStream, micSilenceDelay, monitorAudio, processRecording, systemSilenceDelay]
+    [connectStream, micSilenceDelay, monitorAudio, enqueueRecording, systemSilenceDelay]
   );
 
   const startMicListening = useCallback(async () => {
