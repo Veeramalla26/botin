@@ -313,6 +313,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
   const openPanelRef = useRef(null);
 
+  const closePanelRef = useRef(null);
+
   const openingPanelRef = useRef(false);
 
   const pipSupported = typeof window !== 'undefined' && 'documentPictureInPicture' in window;
@@ -433,9 +435,31 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
     w.document.body.style.overflow = 'hidden';
 
+    w.document.body.tabIndex = -1;
+
+    try {
+
+      w.focus();
+
+    } catch {
+
+      /* ignore */
+
+    }
+
+    const onPipKeyDown = (e) => {
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyP') return;
+      e.preventDefault();
+      closePanelRef.current?.();
+    };
+
+    w.addEventListener('keydown', onPipKeyDown);
+
 
 
     w.addEventListener('pagehide', () => {
+
+      w.removeEventListener('keydown', onPipKeyDown);
 
       panelWindowRef.current = null;
 
@@ -664,6 +688,14 @@ export function useFloatingPanel({ enabled = true } = {}) {
     openPanelRef.current = openPanel;
 
   }, [openPanel]);
+
+
+
+  useEffect(() => {
+
+    closePanelRef.current = closePanel;
+
+  }, [closePanel]);
 
 
 

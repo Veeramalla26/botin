@@ -552,6 +552,24 @@ function FloatWindowApp() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyP') return;
+      e.preventDefault();
+      markExplicitPanelClose();
+      try {
+        const channel = new BroadcastChannel('interview-bot-float-sync');
+        channel.postMessage({ type: 'explicit-close' });
+        channel.close();
+      } catch {
+        /* ignore */
+      }
+      window.setTimeout(() => window.close(), 0);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
     <div className="app float-window">
       <FloatingResponsePanel
@@ -634,6 +652,7 @@ export default function App() {
   const stopListeningRef = useRef(() => {});
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
+  const isFloatOpenRef = useRef(false);
   const selectedResumeIdRef = useRef(null);
   const resumesRef = useRef([]);
 
@@ -1027,12 +1046,16 @@ export default function App() {
   } = useFloatingPanel({ enabled: !isPopout });
 
   const toggleFloatPanel = useCallback(() => {
-    if (isFloatOpen) {
+    if (isFloatOpenRef.current) {
       closeFloatPanel();
     } else {
       openFloatPanel();
     }
-  }, [isFloatOpen, closeFloatPanel, openFloatPanel]);
+  }, [closeFloatPanel, openFloatPanel]);
+
+  useEffect(() => {
+    isFloatOpenRef.current = isFloatOpen;
+  }, [isFloatOpen]);
 
   useEffect(() => {
     if (isPopout) return undefined;
@@ -1275,7 +1298,7 @@ export default function App() {
         <>
       <header className="header">
         <div className="header-left">
-          <h1>{isPopout ? 'Notes' : 'Interview Bot'}</h1>
+          <h1>{isPopout ? 'Notes' : 'Docs'}</h1>
           <span className="session-info">
             Session joined: {session.userName}
             {activeResume ? ` · Resume: ${activeResume.name}` : ''}

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 const STORAGE_KEY = 'interviewBotHideApp';
 const HIDDEN_TITLE = 'Untitled document - Google Docs';
-const NORMAL_TITLE = 'Interview Bot';
+const NORMAL_TITLE = 'Docs';
 
 export function useHideApp() {
   const [hideApp, setHideAppState] = useState(() => {

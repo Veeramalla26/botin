@@ -107,7 +107,7 @@ export default function FloatingResponsePanel({
         <div className="float-window-brand">
           <span className="float-window-icon" aria-hidden="true" />
           <span className="float-window-title">
-            Interview Bot{minimized ? '' : ` — Responses (${allItems.length})`}
+            Docs{minimized ? '' : ` — Responses (${allItems.length})`}
           </span>
         </div>
         <div className="float-window-controls">
