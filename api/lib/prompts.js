@@ -109,22 +109,35 @@ function fixFollowUpTypos(prompt = '') {
     .replace(/\bofit\b/gi, 'of it');
 }
 
+function buildResumeContextBlock(resumeText, mode) {
+  if (!resumeText?.trim()) return '';
+
+  const strict =
+    mode === 'resume'
+      ? 'This is a resume or background question — answer ONLY from the resume. Do not invent employers, dates, projects, or skills that are not listed.'
+      : 'When the question is about the candidate\'s experience, role, skills, projects, education, or background, base your answer on this resume. For general technical questions, answer normally without forcing resume details.';
+
+  return `Candidate resume/CV (use for personal and experience questions):\n---\n${resumeText.trim()}\n---\n${strict}\n\n`;
+}
+
 function buildUserMessage(prompt, mode, context = {}) {
-  const { questionText, previousResponse, conversationHistory } = context;
+  const { questionText, previousResponse, conversationHistory, resumeText } = context;
   const normalizedPrompt = fixFollowUpTypos(prompt);
   const followUp = isFollowUpQuestion(prompt);
   const lastTurn = conversationHistory?.length
     ? conversationHistory[conversationHistory.length - 1]
     : null;
 
+  const resumeBlock = buildResumeContextBlock(resumeText, mode);
+
   if (questionText) {
-    return `Interview question: ${questionText}\n\nAdditional context: ${prompt || 'None'}`;
+    return `${resumeBlock}Interview question: ${questionText}\n\nAdditional context: ${prompt || 'None'}`;
   }
   if (previousResponse && mode === 'elaborate') {
-    return `Previous answer:\n${previousResponse}\n\nElaborate on this answer with more detail and examples. Keep the same spoken, human tone — don't reset into a formal essay style.`;
+    return `${resumeBlock}Previous answer:\n${previousResponse}\n\nElaborate on this answer with more detail and examples. Keep the same spoken, human tone — don't reset into a formal essay style.`;
   }
 
-  let message = '';
+  let message = resumeBlock;
 
   if (conversationHistory?.length) {
     const historyBlock = conversationHistory

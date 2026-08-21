@@ -9,7 +9,7 @@ import { useFloatingPanel, useResponseSync, markExplicitPanelClose } from './hoo
 import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
-import { streamChatResponse, buildHeading } from './services/api';
+import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -71,6 +71,122 @@ function FixedQuestionModal({ questions, onSelect, onClose }) {
         </div>
         <button className="btn-close-modal" onClick={onClose}>Close</button>
       </div>
+    </div>
+  );
+}
+
+function UserMenu({
+  user,
+  resumes,
+  selectedResumeId,
+  onSelectResume,
+  onUploadResume,
+  onDeleteResume,
+  uploadingResume,
+  onSignOut,
+}) {
+  const [open, setOpen] = useState(false);
+  const [showResumeList, setShowResumeList] = useState(false);
+  const menuRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false);
+        setShowResumeList(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedResume = resumes.find((r) => r.id === selectedResumeId);
+  const displayName = user.displayName || user.email;
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setOpen(true);
+    await onUploadResume(file);
+  };
+
+  return (
+    <div className="user-menu" ref={menuRef}>
+      <button
+        type="button"
+        className="user-menu-trigger"
+        onClick={() => setOpen((prev) => !prev)}
+        title="Account menu"
+        aria-expanded={open}
+      >
+        <div className="avatar">👤</div>
+        <span className="user-menu-caret">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="user-menu-dropdown">
+          <div className="user-menu-header">{displayName}</div>
+
+          <button
+            type="button"
+            className={`user-menu-item${showResumeList ? ' active' : ''}`}
+            onClick={() => setShowResumeList((prev) => !prev)}
+          >
+            Select Resume
+            {selectedResume ? `: ${selectedResume.name}` : ''}
+          </button>
+
+          {showResumeList && (
+            <div className="resume-list">
+              {resumes.length === 0 && (
+                <div className="resume-list-empty">No resumes uploaded yet</div>
+              )}
+              {resumes.map((resume) => (
+                <div key={resume.id} className="resume-list-row">
+                  <button
+                    type="button"
+                    className={`resume-list-item${resume.id === selectedResumeId ? ' selected' : ''}`}
+                    onClick={() => onSelectResume(resume.id)}
+                  >
+                    {resume.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="resume-delete-btn"
+                    onClick={() => onDeleteResume(resume.id)}
+                    title="Delete resume"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="user-menu-item"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingResume}
+          >
+            {uploadingResume ? 'Uploading...' : 'Upload Resume (PDF, DOC, TXT)'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={RESUME_ACCEPT}
+            className="hidden-file-input"
+            onChange={handleFileChange}
+          />
+
+          <div className="user-menu-divider" />
+          <button type="button" className="user-menu-item" onClick={onSignOut}>
+            Logout
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -182,6 +298,9 @@ export default function App() {
   const [showFixedModal, setShowFixedModal] = useState(false);
   const [lastResponse, setLastResponse] = useState(null);
   const [streamingResponse, setStreamingResponse] = useState(null);
+  const [resumes, setResumes] = useState([]);
+  const [selectedResumeId, setSelectedResumeId] = useState(null);
+  const [uploadingResume, setUploadingResume] = useState(false);
   const notesTimerRef = useRef(null);
   const promptTimerRef = useRef(null);
   const draftTimerRef = useRef(null);
@@ -198,6 +317,8 @@ export default function App() {
   const stopListeningRef = useRef(() => {});
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
+  const selectedResumeIdRef = useRef(null);
+  const resumesRef = useRef([]);
 
   useEffect(() => {
     responsesRef.current = responses;
@@ -206,6 +327,14 @@ export default function App() {
   useEffect(() => {
     lastResponseRef.current = lastResponse;
   }, [lastResponse]);
+
+  useEffect(() => {
+    selectedResumeIdRef.current = selectedResumeId;
+  }, [selectedResumeId]);
+
+  useEffect(() => {
+    resumesRef.current = resumes;
+  }, [resumes]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -268,6 +397,30 @@ export default function App() {
 
     return unsub;
   }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setResumes([]);
+      setSelectedResumeId(null);
+      return undefined;
+    }
+
+    const unsubResumes = firestoreApi.subscribeToResumes(user.uid, setResumes);
+    const unsubSelected = firestoreApi.subscribeToSelectedResumeId(user.uid, setSelectedResumeId);
+
+    return () => {
+      unsubResumes();
+      unsubSelected();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !resumes.length) return;
+    if (selectedResumeId && resumes.some((r) => r.id === selectedResumeId)) return;
+    if (selectedResumeId && !resumes.some((r) => r.id === selectedResumeId)) {
+      firestoreApi.setSelectedResumeId(user.uid, null).catch(() => {});
+    }
+  }, [user, resumes, selectedResumeId]);
 
   useEffect(() => {
     if (!session?.id) return undefined;
@@ -414,7 +567,10 @@ export default function App() {
   };
 
   const handleGenerate = async (mode, overridePrompt, questionText) => {
-    const text = (overridePrompt ?? prompt).trim();
+    let text = (overridePrompt ?? prompt).trim();
+    if (!text && mode === 'resume') {
+      text = 'Tell me about yourself';
+    }
     if ((!text && !questionText) || !sessionRef.current || !userRef.current) return;
     if (loadingRef.current || isGeneratingRef.current) return;
 
@@ -445,6 +601,8 @@ export default function App() {
 
     try {
       const conversationHistory = buildConversationHistory();
+      const activeResume = resumesRef.current.find((r) => r.id === selectedResumeIdRef.current);
+      const resumeText = activeResume?.extractedText || undefined;
 
       const responseText = await streamChatResponse(
         {
@@ -453,6 +611,7 @@ export default function App() {
           questionText,
           previousResponse: mode === 'elaborate' ? lastResponse?.response : undefined,
           conversationHistory: mode === 'elaborate' ? undefined : conversationHistory,
+          resumeText,
         },
         (partial) => {
           setStreamingResponse((prev) =>
@@ -648,6 +807,44 @@ export default function App() {
     setResponses([]);
     setNotes('');
     setPrompt('');
+    setResumes([]);
+    setSelectedResumeId(null);
+  };
+
+  const handleSelectResume = async (resumeId) => {
+    if (!user) return;
+    const nextId = selectedResumeId === resumeId ? null : resumeId;
+    await firestoreApi.setSelectedResumeId(user.uid, nextId);
+  };
+
+  const handleUploadResume = async (file) => {
+    if (!user) return;
+    setUploadingResume(true);
+    try {
+      const extractedText = await parseResumeFile(file);
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      const saved = await firestoreApi.saveResume(user.uid, {
+        name: baseName,
+        fileName: file.name,
+        extractedText,
+      });
+      await firestoreApi.setSelectedResumeId(user.uid, saved.id);
+    } catch (err) {
+      alert(err.message || 'Failed to upload resume');
+    } finally {
+      setUploadingResume(false);
+    }
+  };
+
+  const handleDeleteResume = async (resumeId) => {
+    if (!user) return;
+    const resume = resumes.find((r) => r.id === resumeId);
+    const label = resume?.name || 'this resume';
+    if (!confirm(`Delete "${label}"?`)) return;
+    await firestoreApi.deleteResume(user.uid, resumeId);
+    if (selectedResumeId === resumeId) {
+      await firestoreApi.setSelectedResumeId(user.uid, null);
+    }
   };
 
   if (!isFirebaseConfigured()) return <ConfigMissing />;
@@ -674,6 +871,8 @@ export default function App() {
     ? `${session.company} - ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
     : new Date().toLocaleDateString();
 
+  const activeResume = resumes.find((r) => r.id === selectedResumeId);
+
   return (
     <div className={`app${isPopout ? ' popout' : ''}${isHidden ? ' app-hidden' : ''}`}>
       {isHidden && <StealthOverlay />}
@@ -693,7 +892,10 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <h1>{isPopout ? 'Notes' : 'Interview Bot'}</h1>
-          <span className="session-info">Session joined: {session.userName}</span>
+          <span className="session-info">
+            Session joined: {session.userName}
+            {activeResume ? ` · Resume: ${activeResume.name}` : ''}
+          </span>
         </div>
         <div className="header-right">
           <button
@@ -734,8 +936,16 @@ export default function App() {
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
           </button>
-          <button className="voice-btn" onClick={handleSignOut} title="Sign out">Sign Out</button>
-          <div className="avatar">👤</div>
+          <UserMenu
+            user={user}
+            resumes={resumes}
+            selectedResumeId={selectedResumeId}
+            onSelectResume={handleSelectResume}
+            onUploadResume={handleUploadResume}
+            onDeleteResume={handleDeleteResume}
+            uploadingResume={uploadingResume}
+            onSignOut={handleSignOut}
+          />
         </div>
       </header>
 

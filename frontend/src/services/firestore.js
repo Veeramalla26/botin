@@ -42,6 +42,14 @@ function activeSessionRef(userId) {
   return doc(db, 'users', userId, 'profile', 'active');
 }
 
+function preferencesRef(userId) {
+  return doc(db, 'users', userId, 'profile', 'preferences');
+}
+
+function resumesPath(userId) {
+  return collection(db, 'users', userId, 'resumes');
+}
+
 function mapSessionDoc(sessionId, data) {
   return {
     id: sessionId,
@@ -190,4 +198,60 @@ export function subscribeToResponses(userId, sessionId, callback) {
 
 export async function updateSessionTimestamp(userId, sessionId) {
   await setDoc(sessionRef(userId, sessionId), { updatedAt: serverTimestamp() }, { merge: true });
+}
+
+function mapResumeDoc(resumeId, data) {
+  return {
+    id: resumeId,
+    name: data.name,
+    fileName: data.fileName,
+    extractedText: data.extractedText,
+    createdAt: data.createdAt?.toDate?.()?.toISOString?.() || null,
+  };
+}
+
+export function subscribeToResumes(userId, callback) {
+  const q = query(resumesPath(userId), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const items = snapshot.docs.map((d) => mapResumeDoc(d.id, d.data()));
+    callback(items);
+  });
+}
+
+export async function saveResume(userId, { name, fileName, extractedText }) {
+  const resumeDoc = doc(resumesPath(userId));
+  const data = {
+    name: name || fileName || 'Resume',
+    fileName: fileName || null,
+    extractedText,
+    createdAt: serverTimestamp(),
+  };
+  await setDoc(resumeDoc, data);
+  return { id: resumeDoc.id, ...data };
+}
+
+export async function deleteResume(userId, resumeId) {
+  await deleteDoc(doc(resumesPath(userId), resumeId));
+}
+
+export async function getSelectedResumeId(userId) {
+  const snap = await getDoc(preferencesRef(userId));
+  return snap.exists() ? snap.data().selectedResumeId || null : null;
+}
+
+export async function setSelectedResumeId(userId, resumeId) {
+  await setDoc(
+    preferencesRef(userId),
+    {
+      selectedResumeId: resumeId || null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+export function subscribeToSelectedResumeId(userId, callback) {
+  return onSnapshot(preferencesRef(userId), (snap) => {
+    callback(snap.exists() ? snap.data().selectedResumeId || null : null);
+  });
 }

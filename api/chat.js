@@ -28,7 +28,14 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { prompt, mode = 'send', questionText, previousResponse, conversationHistory } = req.body || {};
+    const {
+      prompt,
+      mode = 'send',
+      questionText,
+      previousResponse,
+      conversationHistory,
+      resumeText,
+    } = req.body || {};
 
     if (!prompt && !questionText) {
       return res.status(400).json({ error: 'prompt or questionText is required' });
@@ -41,6 +48,7 @@ module.exports = async (req, res) => {
       questionText,
       previousResponse,
       conversationHistory,
+      resumeText,
     });
 
     const maxTokens =
