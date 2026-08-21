@@ -295,6 +295,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
   const explicitCloseRef = useRef(false);
 
+  const userClosedPanelRef = useRef(false);
+
   const reopenTimerRef = useRef(null);
 
   const reopenAttemptsRef = useRef(0);
@@ -342,6 +344,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
 
   const closePanel = useCallback(() => {
+
+    userClosedPanelRef.current = true;
 
     explicitCloseRef.current = true;
 
@@ -425,7 +429,15 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
       setIsMinimized(false);
 
-      const wasExplicitClose = explicitCloseRef.current || consumeExplicitPanelCloseFlag();
+      const wasExplicitClose =
+
+        userClosedPanelRef.current ||
+
+        explicitCloseRef.current ||
+
+        consumeExplicitPanelCloseFlag() ||
+
+        isExplicitPanelClosePending();
 
 
 
@@ -452,6 +464,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
         reopenTimerRef.current = null;
 
         if (
+
+          userClosedPanelRef.current ||
 
           explicitCloseRef.current ||
 
@@ -547,6 +561,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
 
 
+    userClosedPanelRef.current = false;
+
     explicitCloseRef.current = false;
 
     clearReopenTimer();
@@ -600,6 +616,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
     channel.onmessage = (event) => {
 
       if (event.data?.type === 'explicit-close') {
+
+        userClosedPanelRef.current = true;
 
         explicitCloseRef.current = true;
 
@@ -658,6 +676,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
 
       const wasExplicitClose =
+
+        userClosedPanelRef.current ||
 
         explicitCloseRef.current ||
 

@@ -5,7 +5,7 @@ import { auth, isFirebaseConfigured } from './firebase';
 import AuthPage from './components/AuthPage';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useHideApp } from './hooks/useHideApp';
-import { useFloatingPanel, useResponseSync, markExplicitPanelClose } from './hooks/useFloatingPanel';
+import { useFloatingPanel, useResponseSync, markExplicitPanelClose, CHANNEL_NAME } from './hooks/useFloatingPanel';
 import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
@@ -1121,11 +1121,25 @@ export default function App() {
       onConfirm: async () => {
         await firestoreApi.clearResponses(user.uid, session.id);
         setLastResponse(null);
+        setStreamingResponse(null);
         setConfirmDialog(null);
       },
       onCancel: () => setConfirmDialog(null),
     });
   };
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return undefined;
+
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    channel.onmessage = (event) => {
+      if (event.data?.type === 'clear-responses') {
+        handleClearAll();
+      }
+    };
+
+    return () => channel.close();
+  }, [user, session]);
 
   const handleSignOut = async () => {
     stopListeningRef.current();
@@ -1222,6 +1236,7 @@ export default function App() {
           isMinimized={isFloatMinimized}
           onSetMinimized={setPanelMinimized}
           onClose={closeFloatPanel}
+          onClearResponses={handleClearAll}
           dragWindow={pipWindow}
         />
       )}

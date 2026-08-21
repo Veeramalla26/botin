@@ -22,6 +22,16 @@ function notifyExplicitPanelClose() {
   }
 }
 
+function notifyClearResponses() {
+  try {
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    channel.postMessage({ type: 'clear-responses' });
+    channel.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 const markdownComponents = {
   strong: ({ children }) => <strong className="keyword">{children}</strong>,
   p: ({ children }) => <p className="response-paragraph">{children}</p>,
@@ -44,6 +54,7 @@ export default function FloatingResponsePanel({
   loading = false,
   onSetMinimized,
   onClose,
+  onClearResponses,
   isPopoutWindow = false,
   isMinimized: controlledMinimized,
   dragWindow = null,
@@ -68,8 +79,8 @@ export default function FloatingResponsePanel({
   }, [minimized, isPopoutWindow, onSetMinimized]);
 
   const handleClose = useCallback(() => {
+    notifyExplicitPanelClose();
     if (isPopoutWindow) {
-      notifyExplicitPanelClose();
       window.setTimeout(() => {
         window.close();
       }, 0);
@@ -77,6 +88,14 @@ export default function FloatingResponsePanel({
       onClose?.();
     }
   }, [isPopoutWindow, onClose]);
+
+  const handleClear = useCallback(() => {
+    if (isPopoutWindow) {
+      notifyClearResponses();
+    } else {
+      onClearResponses?.();
+    }
+  }, [isPopoutWindow, onClearResponses]);
 
   return (
     <div className={`float-panel${minimized ? ' minimized' : ''}`}>
@@ -115,6 +134,7 @@ export default function FloatingResponsePanel({
       </div>
 
       {!minimized && (
+        <>
         <div className="float-panel-feed">
           {allItems.length === 0 ? (
             <p className="float-panel-empty">No responses yet.</p>
@@ -139,6 +159,18 @@ export default function FloatingResponsePanel({
             ))
           )}
         </div>
+        <div className="float-panel-footer">
+          <button
+            type="button"
+            className="float-panel-clear"
+            onClick={handleClear}
+            disabled={allItems.length === 0 && !loading}
+            title="Clear all responses"
+          >
+            Clear responses
+          </button>
+        </div>
+        </>
       )}
     </div>
   );

@@ -1696,6 +1696,37 @@ body.float-popout-minimized .app.float-window {
   margin: 0.5rem;
 }
 
+.float-panel-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0.35rem 0.55rem 0.5rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.float-panel-clear {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.float-panel-clear:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.float-panel-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .float-item {
   margin: 0;
   margin-bottom: 0.7rem;
