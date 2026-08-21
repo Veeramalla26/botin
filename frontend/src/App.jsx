@@ -154,6 +154,8 @@ export default function App() {
   const notesEditingRef = useRef(false);
   const promptEditingRef = useRef(false);
   const isGeneratingRef = useRef(false);
+  const draftWriteGenRef = useRef(0);
+  const completedStreamIdsRef = useRef(new Set());
   const prevSessionIdRef = useRef(null);
   const sessionRef = useRef(null);
   const loadingRef = useRef(false);
@@ -242,6 +244,9 @@ export default function App() {
     setNotes('');
     setStreamingResponse(null);
     setLoading(false);
+    loadingRef.current = false;
+    isGeneratingRef.current = false;
+    completedStreamIdsRef.current = new Set();
     setLastResponse(null);
     setResponses([]);
   }, [session?.id]);
@@ -261,6 +266,10 @@ export default function App() {
 
     const unsubDraft = firestoreApi.subscribeToDraft(user.uid, session.id, (draft) => {
       if (isGeneratingRef.current) return;
+      if (draft?.streamId && completedStreamIdsRef.current.has(draft.streamId)) {
+        firestoreApi.clearDraft(user.uid, session.id).catch(() => {});
+        return;
+      }
       if (draft) {
         setStreamingResponse({
           id: draft.streamId || 'remote-stream',
@@ -292,7 +301,7 @@ export default function App() {
   const handlePromptKeyDown = (e) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
     e.preventDefault();
-    if (!loading && prompt.trim()) {
+    if (!loadingRef.current && !isGeneratingRef.current && prompt.trim()) {
       handleGenerate('send');
     }
   };
@@ -316,10 +325,12 @@ export default function App() {
     }, 200);
   }, []);
 
-  const syncDraftRemote = useCallback((draft) => {
+  const syncDraftRemote = useCallback((draft, writeGen) => {
     if (!userRef.current || !sessionRef.current) return;
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     draftTimerRef.current = setTimeout(() => {
+      if (writeGen !== draftWriteGenRef.current) return;
+      if (!isGeneratingRef.current) return;
       firestoreApi.saveDraft(userRef.current.uid, sessionRef.current.id, draft).catch(() => {});
     }, 150);
   }, []);
@@ -353,10 +364,13 @@ export default function App() {
 
   const handleGenerate = async (mode, overridePrompt, questionText) => {
     const text = (overridePrompt ?? prompt).trim();
-    if ((!text && !questionText) || !sessionRef.current || !userRef.current || loadingRef.current) return;
+    if ((!text && !questionText) || !sessionRef.current || !userRef.current) return;
+    if (loadingRef.current || isGeneratingRef.current) return;
 
     const heading = buildHeading(text, mode, questionText);
     const streamId = `stream-${Date.now()}`;
+    draftWriteGenRef.current += 1;
+    const writeGen = draftWriteGenRef.current;
     const draftBase = {
       streamId,
       heading,
@@ -366,6 +380,7 @@ export default function App() {
     };
 
     isGeneratingRef.current = true;
+    loadingRef.current = true;
     setLoading(true);
     setStreamingResponse({
       id: streamId,
@@ -391,7 +406,7 @@ export default function App() {
           setStreamingResponse((prev) =>
             prev?.id === streamId ? { ...prev, response: partial } : prev
           );
-          syncDraftRemote({ ...draftBase, response: partial });
+          syncDraftRemote({ ...draftBase, response: partial }, writeGen);
         }
       );
 
@@ -401,6 +416,11 @@ export default function App() {
         mode,
         heading,
       });
+
+      completedStreamIdsRef.current.add(streamId);
+      if (completedStreamIdsRef.current.size > 20) {
+        completedStreamIdsRef.current = new Set([...completedStreamIdsRef.current].slice(-20));
+      }
 
       setLastResponse(saved);
       if (!overridePrompt) {
@@ -412,10 +432,18 @@ export default function App() {
     } catch (err) {
       alert(err.message);
     } finally {
+      draftWriteGenRef.current += 1;
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
       isGeneratingRef.current = false;
+      loadingRef.current = false;
       setStreamingResponse(null);
       setLoading(false);
-      firestoreApi.clearDraft(userRef.current.uid, sessionRef.current.id).catch(() => {});
+      if (userRef.current && sessionRef.current) {
+        firestoreApi.clearDraft(userRef.current.uid, sessionRef.current.id).catch(() => {});
+      }
     }
   };
 
