@@ -10,6 +10,7 @@ import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
+import { isSpuriousTranscript } from './utils/transcriptFilter';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -514,7 +515,7 @@ const markdownComponents = {
 function ResponseItem({ item, onDelete, onAddToNotes, onCopy, isStreaming = false }) {
   return (
     <div className={`response-item${isStreaming ? ' streaming' : ''}`}>
-      <div className="response-heading">{item.heading || item.prompt}</div>
+      <div className="response-heading">{item.prompt || item.heading}</div>
       <div className="response-body">
         {item.response ? (
           <ReactMarkdown components={markdownComponents}>{item.response}</ReactMarkdown>
@@ -1010,6 +1011,7 @@ export default function App() {
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
+    if (isSpuriousTranscript(cleaned)) return;
 
     setPrompt(cleaned);
     promptEditingRef.current = true;

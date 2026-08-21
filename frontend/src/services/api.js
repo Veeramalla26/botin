@@ -144,6 +144,5 @@ export function buildHeading(prompt, mode, questionText) {
   if (mode === 'fixed_question' && questionText) {
     return `[Fixed Question] ${questionText}`;
   }
-  const text = prompt || questionText || '';
-  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+  return prompt || questionText || '';
 }

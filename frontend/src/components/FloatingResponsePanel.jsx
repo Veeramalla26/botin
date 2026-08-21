@@ -144,7 +144,7 @@ export default function FloatingResponsePanel({
                 key={item.id || 'stream'}
                 className={`response-item float-item${item.id?.startsWith('stream') ? ' streaming' : ''}`}
               >
-                <div className="response-heading">{item.heading || item.prompt}</div>
+                <div className="response-heading">{item.prompt || item.heading}</div>
                 <div className="response-body">
                   {item.response ? (
                     <ReactMarkdown components={markdownComponents}>{item.response}</ReactMarkdown>
