@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { transcribeAudio } from '../services/api';
-import { isSpuriousTranscript } from '../utils/transcriptFilter';
+import { shouldProcessVoiceTranscript } from '../utils/transcriptFilter';
 
-const SYSTEM_LISTEN_TITLE = 'meet.google.com is sharing a window.';
+const SYSTEM_LISTEN_TITLE = 'Google Meet';
+const SYSTEM_MIN_SPEECH_MS = 900;
 
 const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
@@ -65,6 +66,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const transcriptionQueueRef = useRef([]);
   const previousTitleRef = useRef('');
+  const lastProcessedTranscriptRef = useRef({ normalized: '', at: 0 });
 
   useEffect(() => {
     onFinalTranscriptRef.current = onFinalTranscript;
@@ -133,6 +135,8 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     setDisplayText('');
     setStatusHint('');
 
+    lastProcessedTranscriptRef.current = { normalized: '', at: 0 };
+
     if (wasSystem && previousTitleRef.current) {
       document.title = previousTitleRef.current;
       previousTitleRef.current = '';
@@ -150,15 +154,25 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     try {
       setStatusHint('Transcribing...');
       const text = (await transcribeAudio(webmBlob, 'audio/webm')).trim();
+      const systemListen = modeRef.current === 'system';
+      const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
+      const now = Date.now();
+      const isDuplicate =
+        normalized &&
+        normalized === lastProcessedTranscriptRef.current.normalized &&
+        now - lastProcessedTranscriptRef.current.at < 45000;
+      const tooSoon =
+        systemListen && now - lastProcessedTranscriptRef.current.at < 4000;
 
       if (
         text.length >= MIN_TEXT_LENGTH &&
-        !isSpuriousTranscript(text) &&
+        !isDuplicate &&
+        !tooSoon &&
+        shouldProcessVoiceTranscript(text, { systemListen }) &&
         onFinalTranscriptRef.current
       ) {
-        setDisplayText(text);
-        onFinalTranscriptRef.current(text);
-        setDisplayText('');
+        lastProcessedTranscriptRef.current = { normalized, at: now };
+        onFinalTranscriptRef.current(text, { systemListen });
       }
     } catch (err) {
       console.error('Audio transcription error:', err);
@@ -170,7 +184,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       } else if (listeningRef.current) {
         setStatusHint(
           modeRef.current === 'system'
-            ? 'meet.google.com is sharing a window.'
+            ? 'Listening for interview questions...'
             : 'Listening to microphone...'
         );
       }
@@ -200,7 +214,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
 
-    if (duration < MIN_SPEECH_MS) {
+    if (duration < (modeRef.current === 'system' ? SYSTEM_MIN_SPEECH_MS : MIN_SPEECH_MS)) {
       skipProcessRef.current = true;
       segmentChunksRef.current = [];
       if (mediaRecorderRef.current?.state === 'recording') {
@@ -220,7 +234,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       speechStartedAtRef.current = Date.now();
     }
     silenceStartedAtRef.current = null;
-    setDisplayText('Speech detected...');
     armRecorder();
   }, [armRecorder]);
 
@@ -399,7 +412,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       'system',
       systemStream,
       SYSTEM_GAIN,
-      'meet.google.com is sharing a window.'
+      'Listening for interview questions...'
     );
   }, [beginCapture, cleanup, isSupported]);
 
@@ -428,7 +441,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (listeningRef.current) {
       setStatusHint(
         modeRef.current === 'system'
-          ? 'meet.google.com is sharing a window.'
+          ? 'Listening for interview questions...'
           : 'Listening to microphone...'
       );
     } else {
@@ -444,7 +457,8 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     isSystemListening: captureMode === 'system',
     captureMode,
     isSupported,
-    displayText: statusHint || displayText,
+    displayText,
+    statusHint,
     toggleMicListening,
     toggleSystemListening,
     stopListening,

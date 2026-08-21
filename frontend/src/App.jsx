@@ -10,7 +10,7 @@ import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
-import { isSpuriousTranscript } from './utils/transcriptFilter';
+import { shouldProcessVoiceTranscript } from './utils/transcriptFilter';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -1006,12 +1006,12 @@ export default function App() {
     }
   };
 
-  const handleVoiceTranscript = useCallback(async (text) => {
+  const handleVoiceTranscript = useCallback(async (text, { systemListen = false } = {}) => {
     if (!sessionRef.current || !userRef.current) return;
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
-    if (isSpuriousTranscript(cleaned)) return;
+    if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) return;
 
     setPrompt(cleaned);
     promptEditingRef.current = true;
@@ -1085,7 +1085,7 @@ export default function App() {
     isListening,
     isMicListening,
     isSystemListening,
-    displayText: voiceDisplayText,
+    statusHint: voiceStatusHint,
     toggleMicListening,
     toggleSystemListening,
     stopListening,
@@ -1098,14 +1098,6 @@ export default function App() {
 
   resetTranscriptRef.current = resetTranscript;
   stopListeningRef.current = stopListening;
-
-  useEffect(() => {
-    if (isListening && voiceDisplayText) {
-      setPrompt(voiceDisplayText);
-      promptEditingRef.current = true;
-      syncPromptRemote(voiceDisplayText);
-    }
-  }, [voiceDisplayText, isListening, syncPromptRemote]);
 
   useEffect(() => () => stopListeningRef.current(), []);
 
@@ -1401,7 +1393,7 @@ export default function App() {
             {responses.length === 0 && !streamingResponse && (
               <div className="empty-state">
                 {isSystemListening
-                  ? 'System Listen is active — share a window or screen with audio (not the Meet tab) so meet.google.com is sharing a window.'
+                  ? (voiceStatusHint || 'System Listen is active — listening for real interview questions from shared audio.')
                   : isMicListening
                     ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
                     : 'Click Listen for microphone, or System Listen and share a window/screen with audio enabled (Google Meet, YouTube, etc.).'}
