@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { transcribeAudio } from '../services/api';
+import { isSpuriousTranscript } from '../utils/transcriptFilter';
+
+const SYSTEM_LISTEN_TITLE = 'meet.google.com is sharing a window.';
 
 const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
@@ -61,6 +64,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const transcriptionQueueRef = useRef([]);
+  const previousTitleRef = useRef('');
 
   useEffect(() => {
     onFinalTranscriptRef.current = onFinalTranscript;
@@ -91,6 +95,8 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   }, []);
 
   const cleanup = useCallback(() => {
+    const wasSystem = modeRef.current === 'system';
+
     if (checkIntervalRef.current) {
       clearInterval(checkIntervalRef.current);
       checkIntervalRef.current = null;
@@ -126,6 +132,11 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     setCaptureMode('');
     setDisplayText('');
     setStatusHint('');
+
+    if (wasSystem && previousTitleRef.current) {
+      document.title = previousTitleRef.current;
+      previousTitleRef.current = '';
+    }
   }, []);
 
   const drainTranscriptionQueue = useCallback(async () => {
@@ -140,7 +151,11 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       setStatusHint('Transcribing...');
       const text = (await transcribeAudio(webmBlob, 'audio/webm')).trim();
 
-      if (text.length >= MIN_TEXT_LENGTH && onFinalTranscriptRef.current) {
+      if (
+        text.length >= MIN_TEXT_LENGTH &&
+        !isSpuriousTranscript(text) &&
+        onFinalTranscriptRef.current
+      ) {
         setDisplayText(text);
         onFinalTranscriptRef.current(text);
         setDisplayText('');
@@ -155,7 +170,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       } else if (listeningRef.current) {
         setStatusHint(
           modeRef.current === 'system'
-            ? 'Listening to tab audio...'
+            ? 'meet.google.com is sharing a window.'
             : 'Listening to microphone...'
         );
       }
@@ -335,7 +350,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          displaySurface: 'browser',
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 5 },
@@ -349,6 +363,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
         preferCurrentTab: false,
         selfBrowserSurface: 'exclude',
         systemAudio: 'include',
+        monitorTypeSurfaces: 'include',
       });
     } catch (err) {
       console.warn('Tab audio capture cancelled:', err);
@@ -359,7 +374,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (!audioTracks.length) {
       displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No tab audio detected.\n\nPick a Chrome tab (YouTube, Google Meet, etc.) and turn ON "Share tab audio" before clicking Share.'
+        'No audio detected.\n\nChoose Window or Entire Screen (with audio enabled). Avoid sharing the Meet tab directly — that keeps the meeting tab clean.'
       );
       return;
     }
@@ -377,11 +392,14 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
     const systemStream = new MediaStream([...audioTracks]);
 
+    previousTitleRef.current = document.title;
+    document.title = SYSTEM_LISTEN_TITLE;
+
     await beginCapture(
       'system',
       systemStream,
       SYSTEM_GAIN,
-      'Listening to tab audio (Meet, YouTube, etc.)...'
+      'meet.google.com is sharing a window.'
     );
   }, [beginCapture, cleanup, isSupported]);
 
@@ -410,7 +428,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (listeningRef.current) {
       setStatusHint(
         modeRef.current === 'system'
-          ? 'Listening to tab audio...'
+          ? 'meet.google.com is sharing a window.'
           : 'Listening to microphone...'
       );
     } else {

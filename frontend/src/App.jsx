@@ -1339,8 +1339,8 @@ export default function App() {
             onClick={toggleSystemListening}
             title={
               isSystemListening
-                ? 'Stop tab audio'
-                : 'Capture tab audio — share YouTube, Google Meet, etc. with "Share tab audio" on'
+                ? 'Stop system audio'
+                : 'Capture Meet audio — share a window or screen with audio (avoid sharing the Meet tab directly)'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
@@ -1401,10 +1401,10 @@ export default function App() {
             {responses.length === 0 && !streamingResponse && (
               <div className="empty-state">
                 {isSystemListening
-                  ? 'System Listen is active — tab audio from Google Meet / YouTube is transcribed when speech pauses.'
+                  ? 'System Listen is active — share a window or screen with audio (not the Meet tab) so meet.google.com is sharing a window.'
                   : isMicListening
                     ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
-                    : 'Click Listen for microphone, or System Listen and share a tab with audio enabled (Google Meet, YouTube, etc.).'}
+                    : 'Click Listen for microphone, or System Listen and share a window/screen with audio enabled (Google Meet, YouTube, etc.).'}
               </div>
             )}
             {streamingResponse && (
