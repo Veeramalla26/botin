@@ -26,7 +26,7 @@ function ConfigMissing() {
   );
 }
 
-function SessionSetup({ user, onJoin }) {
+function SessionSetup({ user, onJoin, waitingForSync }) {
   const [company, setCompany] = useState('');
 
   const handleSubmit = (e) => {
@@ -37,15 +37,21 @@ function SessionSetup({ user, onJoin }) {
   return (
     <div className="setup-overlay">
       <form className="setup-form" onSubmit={handleSubmit}>
-        <h2>Join Interview Session</h2>
+        <h2>Start Interview Session</h2>
         <p className="auth-subtitle">Signed in as {user.displayName || user.email}</p>
+        {waitingForSync && (
+          <p className="auth-subtitle">Syncing with your other devices...</p>
+        )}
         <input
           type="text"
           placeholder="Company (e.g. eBay)"
           value={company}
           onChange={(e) => setCompany(e.target.value)}
         />
-        <button type="submit">Join Session</button>
+        <button type="submit">Start Session</button>
+        <p className="auth-subtitle">
+          This session syncs across all devices signed in with this account.
+        </p>
       </form>
     </div>
   );
@@ -134,6 +140,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
+  const [sessionResolving, setSessionResolving] = useState(true);
   const [prompt, setPrompt] = useState('');
   const [notes, setNotes] = useState('');
   const [responses, setResponses] = useState([]);
@@ -142,6 +149,11 @@ export default function App() {
   const [lastResponse, setLastResponse] = useState(null);
   const [streamingResponse, setStreamingResponse] = useState(null);
   const notesTimerRef = useRef(null);
+  const promptTimerRef = useRef(null);
+  const draftTimerRef = useRef(null);
+  const notesEditingRef = useRef(false);
+  const promptEditingRef = useRef(false);
+  const isGeneratingRef = useRef(false);
   const sessionRef = useRef(null);
   const loadingRef = useRef(false);
   const userRef = useRef(null);
@@ -184,18 +196,87 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setSessionResolving(false);
+      return undefined;
+    }
+
+    setSessionResolving(true);
+    let migrated = false;
+
+    const unsub = firestoreApi.subscribeToActiveSession(user.uid, async (activeSession) => {
+      if (activeSession) {
+        setSession((prev) => (prev?.id === activeSession.id ? prev : activeSession));
+        setSessionResolving(false);
+        return;
+      }
+
+      if (!migrated) {
+        migrated = true;
+        const recent = await firestoreApi.getMostRecentSession(user.uid);
+        if (recent) {
+          await firestoreApi.setActiveSession(user.uid, recent.id);
+          setSession(recent);
+        }
+      }
+      setSessionResolving(false);
+    });
+
+    return unsub;
+  }, [user]);
+
+  useEffect(() => {
+    if (!session?.id) return undefined;
+
+    setPrompt('');
+    setNotes('');
+    setStreamingResponse(null);
+    setLoading(false);
+    setLastResponse(null);
+    setResponses([]);
+  }, [session?.id]);
+
+  useEffect(() => {
     if (!user || !session) return undefined;
 
-    const unsub = firestoreApi.subscribeToResponses(user.uid, session.id, (items) => {
+    const unsubResponses = firestoreApi.subscribeToResponses(user.uid, session.id, (items) => {
       setResponses(items);
       if (items.length) setLastResponse(items[0]);
     });
 
-    firestoreApi.getNotes(user.uid, session.id).then((data) => {
+    const unsubNotes = firestoreApi.subscribeToNotes(user.uid, session.id, (data) => {
+      if (notesEditingRef.current) return;
       setNotes(data.content || '');
     });
 
-    return unsub;
+    const unsubDraft = firestoreApi.subscribeToDraft(user.uid, session.id, (draft) => {
+      if (isGeneratingRef.current) return;
+      if (draft) {
+        setStreamingResponse({
+          id: draft.streamId || 'remote-stream',
+          heading: draft.heading,
+          response: draft.response || '',
+          mode: draft.mode,
+          prompt: draft.prompt,
+        });
+        setLoading(true);
+      } else {
+        setStreamingResponse(null);
+        setLoading(false);
+      }
+    });
+
+    const unsubUi = firestoreApi.subscribeToUiState(user.uid, session.id, (state) => {
+      if (promptEditingRef.current) return;
+      if (state.prompt !== undefined) setPrompt(state.prompt);
+    });
+
+    return () => {
+      unsubResponses();
+      unsubNotes();
+      unsubDraft();
+      unsubUi();
+    };
   }, [user, session]);
 
   const handlePromptKeyDown = (e) => {
@@ -210,6 +291,35 @@ export default function App() {
     const sess = await firestoreApi.createSession(user.uid, userName, company);
     setSession(sess);
   };
+
+  const handleNewSession = async () => {
+    if (!user) return;
+    if (!confirm('Start a new session? All devices on this account will switch to it.')) return;
+    stopListeningRef.current();
+    const sess = await firestoreApi.createSession(
+      user.uid,
+      user.displayName || user.email,
+      session?.company || ''
+    );
+    setSession(sess);
+  };
+
+  const syncPromptRemote = useCallback((value) => {
+    if (!userRef.current || !sessionRef.current) return;
+    if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+    promptTimerRef.current = setTimeout(() => {
+      firestoreApi.saveUiState(userRef.current.uid, sessionRef.current.id, { prompt: value }).catch(() => {});
+      promptEditingRef.current = false;
+    }, 500);
+  }, []);
+
+  const syncDraftRemote = useCallback((draft) => {
+    if (!userRef.current || !sessionRef.current) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      firestoreApi.saveDraft(userRef.current.uid, sessionRef.current.id, draft).catch(() => {});
+    }, 150);
+  }, []);
 
   const buildConversationHistory = () => {
     const turns = [];
@@ -244,7 +354,15 @@ export default function App() {
 
     const heading = buildHeading(text, mode, questionText);
     const streamId = `stream-${Date.now()}`;
+    const draftBase = {
+      streamId,
+      heading,
+      response: '',
+      mode,
+      prompt: text || questionText,
+    };
 
+    isGeneratingRef.current = true;
     setLoading(true);
     setStreamingResponse({
       id: streamId,
@@ -253,6 +371,7 @@ export default function App() {
       mode,
       prompt: text || questionText,
     });
+    firestoreApi.saveDraft(userRef.current.uid, sessionRef.current.id, draftBase).catch(() => {});
 
     try {
       const conversationHistory = buildConversationHistory();
@@ -269,6 +388,7 @@ export default function App() {
           setStreamingResponse((prev) =>
             prev?.id === streamId ? { ...prev, response: partial } : prev
           );
+          syncDraftRemote({ ...draftBase, response: partial });
         }
       );
 
@@ -280,14 +400,19 @@ export default function App() {
       });
 
       setLastResponse(saved);
-      if (!overridePrompt) setPrompt('');
+      if (!overridePrompt) {
+        setPrompt('');
+        firestoreApi.saveUiState(userRef.current.uid, sessionRef.current.id, { prompt: '' }).catch(() => {});
+      }
       resetTranscriptRef.current();
       firestoreApi.updateSessionTimestamp(userRef.current.uid, sessionRef.current.id).catch(() => {});
     } catch (err) {
       alert(err.message);
     } finally {
+      isGeneratingRef.current = false;
       setStreamingResponse(null);
       setLoading(false);
+      firestoreApi.clearDraft(userRef.current.uid, sessionRef.current.id).catch(() => {});
     }
   };
 
@@ -298,13 +423,15 @@ export default function App() {
     if (cleaned.length < 3) return;
 
     setPrompt(cleaned);
+    promptEditingRef.current = true;
+    syncPromptRemote(cleaned);
 
     if (loadingRef.current) {
       return;
     }
 
     handleGenerate('send', cleaned);
-  }, [lastResponse]);
+  }, [syncPromptRemote]);
 
   const {
     hideApp,
@@ -354,8 +481,10 @@ export default function App() {
   useEffect(() => {
     if (isListening && voiceDisplayText) {
       setPrompt(voiceDisplayText);
+      promptEditingRef.current = true;
+      syncPromptRemote(voiceDisplayText);
     }
-  }, [voiceDisplayText, isListening]);
+  }, [voiceDisplayText, isListening, syncPromptRemote]);
 
   useEffect(() => () => stopListeningRef.current(), []);
 
@@ -372,10 +501,30 @@ export default function App() {
 
   const handleNotesChange = (value) => {
     setNotes(value);
+    notesEditingRef.current = true;
     if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
     notesTimerRef.current = setTimeout(() => {
-      if (session && user) firestoreApi.saveNotes(user.uid, session.id, value);
+      if (session && user) {
+        firestoreApi.saveNotes(user.uid, session.id, value).finally(() => {
+          notesEditingRef.current = false;
+        });
+      } else {
+        notesEditingRef.current = false;
+      }
     }, 1000);
+  };
+
+  const handlePromptChange = (value) => {
+    setPrompt(value);
+    promptEditingRef.current = true;
+    syncPromptRemote(value);
+  };
+
+  const handlePromptReset = () => {
+    setPrompt('');
+    resetTranscript();
+    promptEditingRef.current = true;
+    syncPromptRemote('');
   };
 
   const handleAddToNotes = (text) => {
@@ -409,7 +558,14 @@ export default function App() {
   if (!isFirebaseConfigured()) return <ConfigMissing />;
   if (!authReady) return <div className="setup-overlay"><div className="setup-form"><p>Loading...</p></div></div>;
   if (!user) return <AuthPage onAuthSuccess={() => {}} />;
-  if (!session) return <SessionSetup user={user} onJoin={handleJoin} />;
+  if (sessionResolving) {
+    return (
+      <div className="setup-overlay">
+        <div className="setup-form"><p>Syncing session...</p></div>
+      </div>
+    );
+  }
+  if (!session) return <SessionSetup user={user} onJoin={handleJoin} waitingForSync={false} />;
 
   const sessionLabel = session.company
     ? `${session.company} - ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
@@ -475,6 +631,7 @@ export default function App() {
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
           </button>
+          <button className="voice-btn" onClick={handleNewSession} title="Start a new synced session">New Session</button>
           <button className="voice-btn" onClick={handleSignOut} title="Sign out">Sign Out</button>
           <div className="avatar">👤</div>
         </div>
@@ -486,14 +643,14 @@ export default function App() {
             <label>Prompt</label>
             <textarea
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handlePromptKeyDown}
               placeholder="Type your prompt here or use voice detection..."
               rows={5}
             />
             <div className="button-grid">
-              <button className="btn reset" onClick={() => { setPrompt(''); resetTranscript(); }}>Reset</button>
-              <button className="btn clear" onClick={() => { setPrompt(''); resetTranscript(); }}>Clear</button>
+              <button className="btn reset" onClick={handlePromptReset}>Reset</button>
+              <button className="btn clear" onClick={handlePromptReset}>Clear</button>
               <button className="btn send" onClick={() => handleGenerate('send')} disabled={loading}>
                 {loading ? 'Generating...' : 'Send'}
               </button>
