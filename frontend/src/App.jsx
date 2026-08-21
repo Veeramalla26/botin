@@ -75,103 +75,169 @@ function FixedQuestionModal({ questions, onSelect, onClose }) {
   );
 }
 
-function UserMenu({
-  user,
+function resumeFileLabel(fileName) {
+  const ext = fileName?.split('.').pop()?.toUpperCase();
+  return ext || 'FILE';
+}
+
+function formatResumeDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function ResumeModal({
+  isOpen,
   resumes,
   selectedResumeId,
-  onSelectResume,
-  onUploadResume,
+  saving,
+  onSave,
+  onCancel,
   onDeleteResume,
-  uploadingResume,
-  onSignOut,
 }) {
-  const [open, setOpen] = useState(false);
-  const [showResumeList, setShowResumeList] = useState(false);
-  const menuRef = useRef(null);
+  const [pendingId, setPendingId] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setOpen(false);
-        setShowResumeList(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    if (isOpen) {
+      setPendingId(selectedResumeId);
+      setPendingFile(null);
+    }
+  }, [isOpen, selectedResumeId]);
 
-  const selectedResume = resumes.find((r) => r.id === selectedResumeId);
-  const displayName = user.displayName || user.email;
+  if (!isOpen) return null;
 
-  const handleFileChange = async (e) => {
+  const pendingUploadSelected = Boolean(pendingFile);
+  const canSave = pendingUploadSelected || pendingId !== selectedResumeId;
+
+  const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-    setOpen(true);
-    await onUploadResume(file);
+    if (file) {
+      setPendingFile(file);
+      setPendingId(null);
+    }
+  };
+
+  const handleSave = () => {
+    onSave({ resumeId: pendingId, file: pendingFile });
   };
 
   return (
-    <div className="user-menu" ref={menuRef}>
-      <button
-        type="button"
-        className="user-menu-trigger"
-        onClick={() => setOpen((prev) => !prev)}
-        title="Account menu"
-        aria-expanded={open}
-      >
-        <div className="avatar">👤</div>
-        <span className="user-menu-caret">{open ? '▲' : '▼'}</span>
-      </button>
-
-      {open && (
-        <div className="user-menu-dropdown">
-          <div className="user-menu-header">{displayName}</div>
-
-          <button
-            type="button"
-            className={`user-menu-item${showResumeList ? ' active' : ''}`}
-            onClick={() => setShowResumeList((prev) => !prev)}
-          >
-            Select Resume
-            {selectedResume ? `: ${selectedResume.name}` : ''}
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="resume-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="resume-modal-title">
+        <div className="resume-modal-header">
+          <div>
+            <h3 id="resume-modal-title">Resume</h3>
+            <p className="resume-modal-subtitle">Choose a resume for interview answers, or upload a new CV.</p>
+          </div>
+          <button type="button" className="resume-modal-close" onClick={onCancel} aria-label="Close">
+            ×
           </button>
+        </div>
 
-          {showResumeList && (
-            <div className="resume-list">
-              {resumes.length === 0 && (
-                <div className="resume-list-empty">No resumes uploaded yet</div>
-              )}
-              {resumes.map((resume) => (
-                <div key={resume.id} className="resume-list-row">
-                  <button
-                    type="button"
-                    className={`resume-list-item${resume.id === selectedResumeId ? ' selected' : ''}`}
-                    onClick={() => onSelectResume(resume.id)}
-                  >
-                    {resume.name}
-                  </button>
-                  <button
-                    type="button"
-                    className="resume-delete-btn"
-                    onClick={() => onDeleteResume(resume.id)}
-                    title="Delete resume"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+        <div className="resume-modal-body">
+          {resumes.length === 0 && !pendingFile && (
+            <div className="resume-cards-empty">
+              <span className="resume-empty-icon">📄</span>
+              <p>No resumes yet</p>
+              <span>Upload a PDF, DOC, or TXT file below to get started.</span>
             </div>
           )}
 
+          <div className="resume-cards">
+            {resumes.map((resume) => {
+              const checked = !pendingUploadSelected && pendingId === resume.id;
+              return (
+                <label
+                  key={resume.id}
+                  className={`resume-card${checked ? ' selected' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="resume-select"
+                    className="resume-card-radio"
+                    checked={checked}
+                    onChange={() => {
+                      setPendingId(resume.id);
+                      setPendingFile(null);
+                    }}
+                  />
+                  <span className="resume-card-radio-ui" aria-hidden="true" />
+                  <div className="resume-card-content">
+                    <span className="resume-card-name">{resume.name}</span>
+                    <span className="resume-card-meta">
+                      {resumeFileLabel(resume.fileName)}
+                      {resume.createdAt ? ` · ${formatResumeDate(resume.createdAt)}` : ''}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="resume-card-delete"
+                    title="Delete resume"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onDeleteResume(resume.id);
+                      if (pendingId === resume.id) setPendingId(null);
+                    }}
+                  >
+                    🗑
+                  </button>
+                </label>
+              );
+            })}
+
+            {pendingFile && (
+              <label className="resume-card selected pending-upload">
+                <input
+                  type="radio"
+                  name="resume-select"
+                  className="resume-card-radio"
+                  checked
+                  readOnly
+                />
+                <span className="resume-card-radio-ui" aria-hidden="true" />
+                <div className="resume-card-content">
+                  <span className="resume-card-name">{pendingFile.name.replace(/\.[^.]+$/, '')}</span>
+                  <span className="resume-card-meta">
+                    {resumeFileLabel(pendingFile.name)} · Ready to upload
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="resume-card-delete"
+                  title="Remove file"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPendingFile(null);
+                    setPendingId(selectedResumeId);
+                  }}
+                >
+                  ×
+                </button>
+              </label>
+            )}
+          </div>
+        </div>
+
+        <div className="resume-modal-upload">
           <button
             type="button"
-            className="user-menu-item"
+            className="resume-upload-btn"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingResume}
+            disabled={saving}
           >
-            {uploadingResume ? 'Uploading...' : 'Upload Resume (PDF, DOC, TXT)'}
+            <span className="resume-upload-icon">↑</span>
+            <span>
+              <strong>Upload CV</strong>
+              <small>PDF, DOC, DOCX, or TXT · max 5 MB</small>
+            </span>
           </button>
           <input
             ref={fileInputRef}
@@ -180,14 +246,101 @@ function UserMenu({
             className="hidden-file-input"
             onChange={handleFileChange}
           />
+        </div>
 
-          <div className="user-menu-divider" />
-          <button type="button" className="user-menu-item" onClick={onSignOut}>
-            Logout
+        <div className="resume-modal-footer">
+          <button type="button" className="resume-btn cancel" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="resume-btn save"
+            onClick={handleSave}
+            disabled={saving || !canSave}
+          >
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
-      )}
+      </div>
     </div>
+  );
+}
+
+function UserMenu({
+  user,
+  resumes,
+  selectedResumeId,
+  onResumeSave,
+  onDeleteResume,
+  savingResume,
+  onSignOut,
+}) {
+  const [open, setOpen] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const displayName = user.displayName || user.email;
+
+  const openResumeModal = () => {
+    setOpen(false);
+    setShowResumeModal(true);
+  };
+
+  const handleResumeSave = async (payload) => {
+    const ok = await onResumeSave(payload);
+    if (ok) setShowResumeModal(false);
+  };
+
+  return (
+    <>
+      <div className="user-menu" ref={menuRef}>
+        <button
+          type="button"
+          className="user-menu-trigger"
+          onClick={() => setOpen((prev) => !prev)}
+          title="Account menu"
+          aria-expanded={open}
+        >
+          <div className="avatar">👤</div>
+          <span className="user-menu-caret">{open ? '▲' : '▼'}</span>
+        </button>
+
+        {open && (
+          <div className="user-menu-dropdown">
+            <div className="user-menu-header">{displayName}</div>
+
+            <button type="button" className="user-menu-item" onClick={openResumeModal}>
+              Resume
+            </button>
+
+            <div className="user-menu-divider" />
+            <button type="button" className="user-menu-item" onClick={onSignOut}>
+              Logout
+            </button>
+          </div>
+        )}
+      </div>
+
+      <ResumeModal
+        isOpen={showResumeModal}
+        resumes={resumes}
+        selectedResumeId={selectedResumeId}
+        saving={savingResume}
+        onSave={handleResumeSave}
+        onCancel={() => setShowResumeModal(false)}
+        onDeleteResume={onDeleteResume}
+      />
+    </>
   );
 }
 
@@ -811,26 +964,26 @@ export default function App() {
     setSelectedResumeId(null);
   };
 
-  const handleSelectResume = async (resumeId) => {
-    if (!user) return;
-    const nextId = selectedResumeId === resumeId ? null : resumeId;
-    await firestoreApi.setSelectedResumeId(user.uid, nextId);
-  };
-
-  const handleUploadResume = async (file) => {
-    if (!user) return;
+  const handleResumeSave = async ({ resumeId, file }) => {
+    if (!user) return false;
     setUploadingResume(true);
     try {
-      const extractedText = await parseResumeFile(file);
-      const baseName = file.name.replace(/\.[^.]+$/, '');
-      const saved = await firestoreApi.saveResume(user.uid, {
-        name: baseName,
-        fileName: file.name,
-        extractedText,
-      });
-      await firestoreApi.setSelectedResumeId(user.uid, saved.id);
+      let finalId = resumeId;
+      if (file) {
+        const extractedText = await parseResumeFile(file);
+        const baseName = file.name.replace(/\.[^.]+$/, '');
+        const saved = await firestoreApi.saveResume(user.uid, {
+          name: baseName,
+          fileName: file.name,
+          extractedText,
+        });
+        finalId = saved.id;
+      }
+      await firestoreApi.setSelectedResumeId(user.uid, finalId || null);
+      return true;
     } catch (err) {
-      alert(err.message || 'Failed to upload resume');
+      alert(err.message || 'Failed to save resume');
+      return false;
     } finally {
       setUploadingResume(false);
     }
@@ -940,10 +1093,9 @@ export default function App() {
             user={user}
             resumes={resumes}
             selectedResumeId={selectedResumeId}
-            onSelectResume={handleSelectResume}
-            onUploadResume={handleUploadResume}
+            onResumeSave={handleResumeSave}
             onDeleteResume={handleDeleteResume}
-            uploadingResume={uploadingResume}
+            savingResume={uploadingResume}
             onSignOut={handleSignOut}
           />
         </div>
