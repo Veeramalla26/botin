@@ -412,11 +412,7 @@ body {
   display: none;
 }
 
-/* Resume modal */
-.modal-overlay:has(.resume-modal) {
-  z-index: 2000;
-}
-
+/* Resume modal shell — z-index for confirm/preview overlays defined with .modal-overlay rules below */
 .resume-modal {
   background: var(--color-surface);
   border-radius: 14px;
@@ -742,15 +738,6 @@ body {
 
 .resume-btn.save.danger {
   background: linear-gradient(135deg, #c53030 0%, #e53e3e 100%);
-}
-
-/* Dialogs */
-.dialog-overlay {
-  z-index: 3000;
-}
-
-.modal-overlay:has(.resume-preview-modal) {
-  z-index: 2500;
 }
 
 .confirm-dialog {
@@ -1222,6 +1209,18 @@ textarea:focus {
   justify-content: center;
   z-index: 100;
   backdrop-filter: blur(2px);
+}
+
+.modal-overlay:has(.resume-modal) {
+  z-index: 2000;
+}
+
+.modal-overlay.dialog-overlay {
+  z-index: 3000;
+}
+
+.modal-overlay.dialog-overlay.preview-overlay {
+  z-index: 2500;
 }
 
 .modal {
