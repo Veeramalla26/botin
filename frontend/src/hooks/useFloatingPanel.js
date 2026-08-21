@@ -17,6 +17,14 @@ export function markExplicitPanelClose() {
   }
 }
 
+export function clearExplicitPanelCloseFlag() {
+  try {
+    localStorage.removeItem(EXPLICIT_CLOSE_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 function consumeExplicitPanelCloseFlag() {
   try {
     if (localStorage.getItem(EXPLICIT_CLOSE_STORAGE_KEY)) {
@@ -305,6 +313,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
   const openPanelRef = useRef(null);
 
+  const openingPanelRef = useRef(false);
+
   const pipSupported = typeof window !== 'undefined' && 'documentPictureInPicture' in window;
 
 
@@ -407,6 +417,10 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
     });
 
+    w.document.body.style.visibility = 'hidden';
+
+    w.document.body.style.opacity = '0';
+
     copyStyles(document, w.document);
 
     w.document.body.classList.add('float-panel-body');
@@ -442,6 +456,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
 
       if (wasExplicitClose) {
+
+        clearExplicitPanelCloseFlag();
 
         setIsOpen(false);
 
@@ -505,6 +521,22 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
     reopenAttemptsRef.current = 0;
 
+    requestAnimationFrame(() => {
+
+      requestAnimationFrame(() => {
+
+        if (w.closed) return;
+
+        w.document.body.style.transition = 'opacity 120ms ease';
+
+        w.document.body.style.visibility = 'visible';
+
+        w.document.body.style.opacity = '1';
+
+      });
+
+    });
+
     return w;
 
   }, [enabled]);
@@ -551,49 +583,79 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
   const openPanel = useCallback(async () => {
 
-    if (!enabled) return;
+    if (!enabled || openingPanelRef.current) return;
 
 
 
     const existing = panelWindowRef.current;
 
-    if (isOpen && existing && !existing.closed) return;
+    if (existing && !existing.closed) {
 
+      setIsOpen(true);
 
-
-    userClosedPanelRef.current = false;
-
-    explicitCloseRef.current = false;
-
-    clearReopenTimer();
-
-
-
-    if (pipSupported) {
+      setUsePopout(Boolean(popoutRef.current && !popoutRef.current.closed));
 
       try {
 
-        await openPipWindow();
+        existing.focus();
 
-        return;
+      } catch {
 
-      } catch (err) {
-
-        if (err?.name !== 'NotAllowedError') {
-
-          console.warn('PiP failed, using popout fallback:', err);
-
-        }
+        /* ignore */
 
       }
+
+      return;
 
     }
 
 
 
-    openPopoutWindow();
+    openingPanelRef.current = true;
 
-  }, [enabled, isOpen, pipSupported, openPipWindow, openPopoutWindow, clearReopenTimer]);
+    userClosedPanelRef.current = false;
+
+    explicitCloseRef.current = false;
+
+    clearExplicitPanelCloseFlag();
+
+    clearReopenTimer();
+
+
+
+    try {
+
+      if (pipSupported) {
+
+        try {
+
+          await openPipWindow();
+
+          return;
+
+        } catch (err) {
+
+          if (err?.name !== 'NotAllowedError') {
+
+            console.warn('PiP failed, using popout fallback:', err);
+
+          }
+
+        }
+
+      }
+
+
+
+      openPopoutWindow();
+
+    } finally {
+
+      openingPanelRef.current = false;
+
+    }
+
+  }, [enabled, pipSupported, openPipWindow, openPopoutWindow, clearReopenTimer]);
 
 
 
@@ -688,6 +750,8 @@ export function useFloatingPanel({ enabled = true } = {}) {
 
 
       if (wasExplicitClose) {
+
+        clearExplicitPanelCloseFlag();
 
         setIsOpen(false);
 

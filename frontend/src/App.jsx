@@ -1110,6 +1110,13 @@ export default function App() {
     await firestoreApi.deleteResponse(user.uid, session.id, id);
   };
 
+  const clearResponsesNow = useCallback(async () => {
+    if (!user || !session) return;
+    await firestoreApi.clearResponses(user.uid, session.id);
+    setLastResponse(null);
+    setStreamingResponse(null);
+  }, [user, session]);
+
   const handleClearAll = () => {
     if (!user || !session) return;
     setConfirmDialog({
@@ -1119,9 +1126,7 @@ export default function App() {
       cancelText: 'Cancel',
       variant: 'danger',
       onConfirm: async () => {
-        await firestoreApi.clearResponses(user.uid, session.id);
-        setLastResponse(null);
-        setStreamingResponse(null);
+        await clearResponsesNow();
         setConfirmDialog(null);
       },
       onCancel: () => setConfirmDialog(null),
@@ -1134,12 +1139,12 @@ export default function App() {
     const channel = new BroadcastChannel(CHANNEL_NAME);
     channel.onmessage = (event) => {
       if (event.data?.type === 'clear-responses') {
-        handleClearAll();
+        clearResponsesNow();
       }
     };
 
     return () => channel.close();
-  }, [user, session]);
+  }, [clearResponsesNow]);
 
   const handleSignOut = async () => {
     stopListeningRef.current();
@@ -1236,7 +1241,7 @@ export default function App() {
           isMinimized={isFloatMinimized}
           onSetMinimized={setPanelMinimized}
           onClose={closeFloatPanel}
-          onClearResponses={handleClearAll}
+          onClearResponses={clearResponsesNow}
           dragWindow={pipWindow}
         />
       )}
