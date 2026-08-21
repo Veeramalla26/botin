@@ -57,6 +57,89 @@ function SessionSetup({ user, onJoin, waitingForSync }) {
   );
 }
 
+function getUserInitials(name = '') {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return (parts[0]?.slice(0, 2) || '?').toUpperCase();
+}
+
+function ConfirmDialog({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', variant = 'danger', onConfirm, onCancel, loading = false }) {
+  return (
+    <div className="modal-overlay dialog-overlay" onClick={onCancel}>
+      <div className="confirm-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className={`confirm-dialog-icon ${variant}`}>
+          {variant === 'danger' ? '!' : '?'}
+        </div>
+        <h3 className="confirm-dialog-title">{title}</h3>
+        <p className="confirm-dialog-message">{message}</p>
+        <div className="confirm-dialog-actions">
+          <button type="button" className="resume-btn cancel" onClick={onCancel} disabled={loading}>
+            {cancelText}
+          </button>
+          <button
+            type="button"
+            className={`resume-btn save${variant === 'danger' ? ' danger' : ''}`}
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? 'Please wait...' : confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertDialog({ title, message, onClose }) {
+  return (
+    <div className="modal-overlay dialog-overlay" onClick={onClose}>
+      <div className="confirm-dialog alert-dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="confirm-dialog-icon info">i</div>
+        <h3 className="confirm-dialog-title">{title}</h3>
+        <p className="confirm-dialog-message">{message}</p>
+        <div className="confirm-dialog-actions single">
+          <button type="button" className="resume-btn save" onClick={onClose}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResumePreviewModal({ preview, onClose }) {
+  if (!preview) return null;
+
+  return (
+    <div className="modal-overlay dialog-overlay preview-overlay" onClick={onClose}>
+      <div className="resume-preview-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="resume-preview-header">
+          <div>
+            <h3>{preview.name}</h3>
+            <p className="resume-preview-meta">
+              {resumeFileLabel(preview.fileName)}
+              {preview.fileName ? ` · ${preview.fileName}` : ''}
+            </p>
+          </div>
+          <button type="button" className="resume-modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="resume-preview-body">
+          <pre className="resume-preview-text">{preview.text}</pre>
+        </div>
+        <div className="resume-preview-footer">
+          <button type="button" className="resume-btn save" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FixedQuestionModal({ questions, onSelect, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -96,16 +179,19 @@ function ResumeModal({
   saving,
   onSave,
   onCancel,
-  onDeleteResume,
+  onRequestDelete,
 }) {
   const [pendingId, setPendingId] = useState(null);
   const [pendingFile, setPendingFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
       setPendingId(selectedResumeId);
       setPendingFile(null);
+      setPreview(null);
     }
   }, [isOpen, selectedResumeId]);
 
@@ -113,6 +199,39 @@ function ResumeModal({
 
   const pendingUploadSelected = Boolean(pendingFile);
   const canSave = pendingUploadSelected || pendingId !== selectedResumeId;
+
+  const handleViewResume = async (e, resume) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPreview({
+      name: resume.name,
+      fileName: resume.fileName,
+      text: resume.extractedText || 'No preview text available for this resume.',
+    });
+  };
+
+  const handleViewPendingFile = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!pendingFile) return;
+    setPreviewLoading(true);
+    try {
+      const text = await parseResumeFile(pendingFile);
+      setPreview({
+        name: pendingFile.name.replace(/\.[^.]+$/, ''),
+        fileName: pendingFile.name,
+        text,
+      });
+    } catch (err) {
+      setPreview({
+        name: pendingFile.name.replace(/\.[^.]+$/, ''),
+        fileName: pendingFile.name,
+        text: `Could not preview this file.\n\n${err.message}`,
+      });
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -128,6 +247,7 @@ function ResumeModal({
   };
 
   return (
+    <>
     <div className="modal-overlay" onClick={onCancel}>
       <div className="resume-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="resume-modal-title">
         <div className="resume-modal-header">
@@ -175,19 +295,29 @@ function ResumeModal({
                       {resume.createdAt ? ` · ${formatResumeDate(resume.createdAt)}` : ''}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="resume-card-delete"
-                    title="Delete resume"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onDeleteResume(resume.id);
-                      if (pendingId === resume.id) setPendingId(null);
-                    }}
-                  >
-                    🗑
-                  </button>
+                  <div className="resume-card-actions">
+                    <button
+                      type="button"
+                      className="resume-card-view"
+                      title="Preview resume"
+                      onClick={(e) => handleViewResume(e, resume)}
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className="resume-card-delete"
+                      title="Delete resume"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onRequestDelete(resume.id);
+                        if (pendingId === resume.id) setPendingId(null);
+                      }}
+                    >
+                      🗑
+                    </button>
+                  </div>
                 </label>
               );
             })}
@@ -208,19 +338,30 @@ function ResumeModal({
                     {resumeFileLabel(pendingFile.name)} · Ready to upload
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="resume-card-delete"
-                  title="Remove file"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPendingFile(null);
-                    setPendingId(selectedResumeId);
-                  }}
-                >
-                  ×
-                </button>
+                <div className="resume-card-actions">
+                  <button
+                    type="button"
+                    className="resume-card-view"
+                    title="Preview file"
+                    onClick={handleViewPendingFile}
+                    disabled={previewLoading}
+                  >
+                    {previewLoading ? '...' : 'View'}
+                  </button>
+                  <button
+                    type="button"
+                    className="resume-card-delete"
+                    title="Remove file"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setPendingFile(null);
+                      setPendingId(selectedResumeId);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </label>
             )}
           </div>
@@ -263,6 +404,9 @@ function ResumeModal({
         </div>
       </div>
     </div>
+
+    <ResumePreviewModal preview={preview} onClose={() => setPreview(null)} />
+    </>
   );
 }
 
@@ -271,7 +415,7 @@ function UserMenu({
   resumes,
   selectedResumeId,
   onResumeSave,
-  onDeleteResume,
+  onRequestDelete,
   savingResume,
   onSignOut,
 }) {
@@ -290,6 +434,8 @@ function UserMenu({
   }, []);
 
   const displayName = user.displayName || user.email;
+  const initials = getUserInitials(displayName);
+  const activeResume = resumes.find((r) => r.id === selectedResumeId);
 
   const openResumeModal = () => {
     setOpen(false);
@@ -306,27 +452,43 @@ function UserMenu({
       <div className="user-menu" ref={menuRef}>
         <button
           type="button"
-          className="user-menu-trigger"
+          className={`user-menu-trigger${open ? ' open' : ''}`}
           onClick={() => setOpen((prev) => !prev)}
           title="Account menu"
           aria-expanded={open}
         >
-          <div className="avatar">👤</div>
+          <div className="user-menu-trigger-avatar">{initials}</div>
           <span className="user-menu-caret">{open ? '▲' : '▼'}</span>
         </button>
 
         {open && (
           <div className="user-menu-dropdown">
-            <div className="user-menu-header">{displayName}</div>
+            <div className="user-menu-profile">
+              <div className="user-menu-avatar">{initials}</div>
+              <div className="user-menu-profile-text">
+                <span className="user-menu-name">{displayName}</span>
+                <span className="user-menu-email">{user.email || 'Signed in'}</span>
+              </div>
+            </div>
 
-            <button type="button" className="user-menu-item" onClick={openResumeModal}>
-              Resume
-            </button>
+            <div className="user-menu-actions">
+              <button type="button" className="user-menu-item" onClick={openResumeModal}>
+                <span className="user-menu-icon resume-icon" aria-hidden="true">📄</span>
+                <span className="user-menu-item-text">
+                  <strong>Resume</strong>
+                  <small>{activeResume ? activeResume.name : 'Upload or select a CV'}</small>
+                </span>
+                <span className="user-menu-chevron" aria-hidden="true">›</span>
+              </button>
 
-            <div className="user-menu-divider" />
-            <button type="button" className="user-menu-item" onClick={onSignOut}>
-              Logout
-            </button>
+              <button type="button" className="user-menu-item logout" onClick={onSignOut}>
+                <span className="user-menu-icon logout-icon" aria-hidden="true">⎋</span>
+                <span className="user-menu-item-text">
+                  <strong>Logout</strong>
+                  <small>Sign out of your account</small>
+                </span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -338,7 +500,7 @@ function UserMenu({
         saving={savingResume}
         onSave={handleResumeSave}
         onCancel={() => setShowResumeModal(false)}
-        onDeleteResume={onDeleteResume}
+        onRequestDelete={onRequestDelete}
       />
     </>
   );
@@ -454,6 +616,8 @@ export default function App() {
   const [resumes, setResumes] = useState([]);
   const [selectedResumeId, setSelectedResumeId] = useState(null);
   const [uploadingResume, setUploadingResume] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [alertDialog, setAlertDialog] = useState(null);
   const notesTimerRef = useRef(null);
   const promptTimerRef = useRef(null);
   const draftTimerRef = useRef(null);
@@ -789,7 +953,7 @@ export default function App() {
       resetTranscriptRef.current();
       firestoreApi.updateSessionTimestamp(userRef.current.uid, sessionRef.current.id).catch(() => {});
     } catch (err) {
-      alert(err.message);
+      setAlertDialog({ title: 'Generation Failed', message: err.message });
     } finally {
       draftWriteGenRef.current += 1;
       if (draftTimerRef.current) {
@@ -946,10 +1110,21 @@ export default function App() {
     await firestoreApi.deleteResponse(user.uid, session.id, id);
   };
 
-  const handleClearAll = async () => {
-    if (!confirm('Clear all responses?') || !user || !session) return;
-    await firestoreApi.clearResponses(user.uid, session.id);
-    setLastResponse(null);
+  const handleClearAll = () => {
+    if (!user || !session) return;
+    setConfirmDialog({
+      title: 'Clear All Responses',
+      message: 'Are you sure you want to clear all responses from this session? This action cannot be undone.',
+      confirmText: 'Clear All',
+      cancelText: 'Cancel',
+      variant: 'danger',
+      onConfirm: async () => {
+        await firestoreApi.clearResponses(user.uid, session.id);
+        setLastResponse(null);
+        setConfirmDialog(null);
+      },
+      onCancel: () => setConfirmDialog(null),
+    });
   };
 
   const handleSignOut = async () => {
@@ -982,22 +1157,32 @@ export default function App() {
       await firestoreApi.setSelectedResumeId(user.uid, finalId || null);
       return true;
     } catch (err) {
-      alert(err.message || 'Failed to save resume');
+      setAlertDialog({ title: 'Save Failed', message: err.message || 'Failed to save resume' });
       return false;
     } finally {
       setUploadingResume(false);
     }
   };
 
-  const handleDeleteResume = async (resumeId) => {
+  const handleRequestDeleteResume = (resumeId) => {
     if (!user) return;
     const resume = resumes.find((r) => r.id === resumeId);
     const label = resume?.name || 'this resume';
-    if (!confirm(`Delete "${label}"?`)) return;
-    await firestoreApi.deleteResume(user.uid, resumeId);
-    if (selectedResumeId === resumeId) {
-      await firestoreApi.setSelectedResumeId(user.uid, null);
-    }
+    setConfirmDialog({
+      title: 'Delete Resume',
+      message: `Are you sure you want to delete "${label}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+      onConfirm: async () => {
+        await firestoreApi.deleteResume(user.uid, resumeId);
+        if (selectedResumeId === resumeId) {
+          await firestoreApi.setSelectedResumeId(user.uid, null);
+        }
+        setConfirmDialog(null);
+      },
+      onCancel: () => setConfirmDialog(null),
+    });
   };
 
   if (!isFirebaseConfigured()) return <ConfigMissing />;
@@ -1094,7 +1279,7 @@ export default function App() {
             resumes={resumes}
             selectedResumeId={selectedResumeId}
             onResumeSave={handleResumeSave}
-            onDeleteResume={handleDeleteResume}
+            onRequestDelete={handleRequestDeleteResume}
             savingResume={uploadingResume}
             onSignOut={handleSignOut}
           />
@@ -1182,6 +1367,26 @@ export default function App() {
           questions={FIXED_QUESTIONS}
           onSelect={handleFixedQuestion}
           onClose={() => setShowFixedModal(false)}
+        />
+      )}
+
+      {confirmDialog && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmText={confirmDialog.confirmText}
+          cancelText={confirmDialog.cancelText}
+          variant={confirmDialog.variant}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={confirmDialog.onCancel}
+        />
+      )}
+
+      {alertDialog && (
+        <AlertDialog
+          title={alertDialog.title}
+          message={alertDialog.message}
+          onClose={() => setAlertDialog(null)}
         />
       )}
         </>
