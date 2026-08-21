@@ -1026,6 +1026,32 @@ export default function App() {
     pipWindow,
   } = useFloatingPanel({ enabled: !isPopout });
 
+  const toggleFloatPanel = useCallback(() => {
+    if (isFloatOpen) {
+      closeFloatPanel();
+    } else {
+      openFloatPanel();
+    }
+  }, [isFloatOpen, closeFloatPanel, openFloatPanel]);
+
+  useEffect(() => {
+    if (isPopout) return undefined;
+
+    const onKeyDown = (e) => {
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyP') return;
+
+      const target = e.target;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+
+      e.preventDefault();
+      toggleFloatPanel();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPopout, toggleFloatPanel]);
+
   useEffect(() => {
     broadcast({ responses, streamingResponse, loading });
   }, [responses, streamingResponse, loading, broadcast]);
@@ -1270,8 +1296,8 @@ export default function App() {
           {!isPopout && (
             <button
               className={`voice-btn ${isFloatOpen ? 'float-active' : ''}`}
-              onClick={isFloatOpen ? closeFloatPanel : openFloatPanel}
-              title="Floating panel — stays visible over Meet and other tabs"
+              onClick={toggleFloatPanel}
+              title="Floating panel — stays visible over Meet and other tabs (Ctrl+Shift+P)"
             >
               {isFloatOpen ? '✕ Close Panel' : '▣ Response Panel'}
             </button>
