@@ -135,6 +135,40 @@ function FloatWindowApp() {
 
 export { FloatWindowApp };
 
+const TAB_ID = `tab-${Math.random().toString(36).slice(2, 11)}`;
+
+function loadCompletedStreamIds(sessionId) {
+  try {
+    const raw = sessionStorage.getItem(`botin-completed-${sessionId}`);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberCompletedStreamId(sessionId, streamId, completedSet) {
+  completedSet.add(streamId);
+  if (completedSet.size > 20) {
+    const trimmed = new Set([...completedSet].slice(-20));
+    completedSet.clear();
+    trimmed.forEach((id) => completedSet.add(id));
+  }
+  try {
+    sessionStorage.setItem(
+      `botin-completed-${sessionId}`,
+      JSON.stringify([...completedSet])
+    );
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+function isStaleOrphanDraft(draft) {
+  if (draft.ownerTabId) return false;
+  const updatedAt = draft.updatedAt?.toDate?.()?.getTime?.() ?? 0;
+  return updatedAt > 0 && Date.now() - updatedAt > 120000;
+}
+
 export default function App() {
   const isPopout = new URLSearchParams(window.location.search).get('popout') === '1';
   const [user, setUser] = useState(null);
@@ -246,9 +280,9 @@ export default function App() {
     setLoading(false);
     loadingRef.current = false;
     isGeneratingRef.current = false;
-    completedStreamIdsRef.current = new Set();
     setLastResponse(null);
     setResponses([]);
+    completedStreamIdsRef.current = loadCompletedStreamIds(session.id);
   }, [session?.id]);
 
   useEffect(() => {
@@ -265,24 +299,41 @@ export default function App() {
     });
 
     const unsubDraft = firestoreApi.subscribeToDraft(user.uid, session.id, (draft) => {
-      if (isGeneratingRef.current) return;
-      if (draft?.streamId && completedStreamIdsRef.current.has(draft.streamId)) {
-        firestoreApi.clearDraft(user.uid, session.id).catch(() => {});
+      if (!draft) {
+        if (!isGeneratingRef.current) {
+          setStreamingResponse(null);
+          setLoading(false);
+          loadingRef.current = false;
+        }
         return;
       }
-      if (draft) {
-        setStreamingResponse({
-          id: draft.streamId || 'remote-stream',
-          heading: draft.heading,
-          response: draft.response || '',
-          mode: draft.mode,
-          prompt: draft.prompt,
-        });
-        setLoading(true);
-      } else {
+
+      // Local generation owns UI state while in progress.
+      if (isGeneratingRef.current) return;
+
+      const isOwnStaleDraft =
+        draft.ownerTabId === TAB_ID ||
+        (draft.streamId && completedStreamIdsRef.current.has(draft.streamId)) ||
+        isStaleOrphanDraft(draft);
+
+      if (isOwnStaleDraft) {
+        firestoreApi.clearDraft(user.uid, session.id).catch(() => {});
         setStreamingResponse(null);
         setLoading(false);
+        loadingRef.current = false;
+        return;
       }
+
+      // Another device/tab is generating.
+      setStreamingResponse({
+        id: draft.streamId || 'remote-stream',
+        heading: draft.heading,
+        response: draft.response || '',
+        mode: draft.mode,
+        prompt: draft.prompt,
+      });
+      setLoading(true);
+      loadingRef.current = true;
     });
 
     const unsubUi = firestoreApi.subscribeToUiState(user.uid, session.id, (state) => {
@@ -373,6 +424,7 @@ export default function App() {
     const writeGen = draftWriteGenRef.current;
     const draftBase = {
       streamId,
+      ownerTabId: TAB_ID,
       heading,
       response: '',
       mode,
@@ -417,11 +469,6 @@ export default function App() {
         heading,
       });
 
-      completedStreamIdsRef.current.add(streamId);
-      if (completedStreamIdsRef.current.size > 20) {
-        completedStreamIdsRef.current = new Set([...completedStreamIdsRef.current].slice(-20));
-      }
-
       setLastResponse(saved);
       if (!overridePrompt) {
         setPrompt('');
@@ -437,12 +484,28 @@ export default function App() {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
       }
+
+      completedStreamIdsRef.current.add(streamId);
+      if (completedStreamIdsRef.current.size > 20) {
+        completedStreamIdsRef.current = new Set([...completedStreamIdsRef.current].slice(-20));
+      }
+      if (sessionRef.current?.id) {
+        rememberCompletedStreamId(sessionRef.current.id, streamId, completedStreamIdsRef.current);
+      }
+
       isGeneratingRef.current = false;
       loadingRef.current = false;
       setStreamingResponse(null);
       setLoading(false);
-      if (userRef.current && sessionRef.current) {
-        firestoreApi.clearDraft(userRef.current.uid, sessionRef.current.id).catch(() => {});
+
+      const uid = userRef.current?.uid;
+      const sid = sessionRef.current?.id;
+      if (uid && sid) {
+        try {
+          await firestoreApi.clearDraft(uid, sid);
+        } catch {
+          /* draft may not exist */
+        }
       }
     }
   };
