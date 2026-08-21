@@ -651,6 +651,7 @@ export default function App() {
   const userRef = useRef(null);
   const resetTranscriptRef = useRef(() => {});
   const stopListeningRef = useRef(() => {});
+  const pendingVoiceTranscriptRef = useRef(null);
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
   const isFloatOpenRef = useRef(false);
@@ -1003,26 +1004,31 @@ export default function App() {
           /* draft may not exist */
         }
       }
+
+      const pending = pendingVoiceTranscriptRef.current;
+      if (pending) {
+        pendingVoiceTranscriptRef.current = null;
+        if (shouldProcessVoiceTranscript(pending.text, { systemListen: pending.systemListen })) {
+          handleGenerate('send', pending.text);
+        }
+      }
     }
   };
 
-  const handleVoiceTranscript = useCallback(async (text, { systemListen = false } = {}) => {
+  const handleVoiceTranscript = useCallback((text, { systemListen = false } = {}) => {
     if (!sessionRef.current || !userRef.current) return;
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
     if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) return;
 
-    setPrompt(cleaned);
-    promptEditingRef.current = true;
-    syncPromptRemote(cleaned);
-
-    if (loadingRef.current) {
+    if (loadingRef.current || isGeneratingRef.current) {
+      pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
       return;
     }
 
     handleGenerate('send', cleaned);
-  }, [syncPromptRemote]);
+  }, []);
 
   const {
     hideApp,
@@ -1085,6 +1091,7 @@ export default function App() {
     isListening,
     isMicListening,
     isSystemListening,
+    isSpeaking: voiceIsSpeaking,
     statusHint: voiceStatusHint,
     toggleMicListening,
     toggleSystemListening,
@@ -1271,6 +1278,17 @@ export default function App() {
     ? `${session.company} - ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
     : new Date().toLocaleDateString();
 
+  const promptPlaceholder = loading
+    ? 'Generating answer...'
+    : isListening
+      ? voiceStatusHint ||
+        (voiceIsSpeaking
+          ? 'Speech detected...'
+          : isSystemListening
+            ? 'Listening for interview questions...'
+            : 'Listening to microphone...')
+      : 'Type your prompt here or use voice detection...';
+
   const activeResume = resumes.find((r) => r.id === selectedResumeId);
 
   return (
@@ -1332,7 +1350,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share a window or screen with audio (avoid sharing the Meet tab directly)'
+                : 'Capture Meet audio — share a Window or Entire Screen with audio (not a Chrome tab)'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
@@ -1357,7 +1375,7 @@ export default function App() {
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handlePromptKeyDown}
-              placeholder="Type your prompt here or use voice detection..."
+              placeholder={promptPlaceholder}
               rows={5}
             />
             <div className="button-grid">

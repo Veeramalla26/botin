@@ -31,8 +31,9 @@ const SPURIOUS_PHRASES = new Set([
   'see you soon',
   'looking forward to it',
   'meet google com is sharing a window',
+  'sharing meet google com to this tab',
+  'sharing this tab to',
   'sharing a window',
-  'sharing this tab',
   'speech detected',
   'transcribing',
   'ok',
@@ -256,7 +257,7 @@ export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}
     return false;
   }
 
-  if (systemListen && normalized.split(' ').length < 4) {
+  if (systemListen && normalized.split(' ').length < 3) {
     return false;
   }
 

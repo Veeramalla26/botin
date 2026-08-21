@@ -3,7 +3,6 @@ import { transcribeAudio } from '../services/api';
 import { shouldProcessVoiceTranscript } from '../utils/transcriptFilter';
 
 const SYSTEM_LISTEN_TITLE = 'Google Meet';
-const SYSTEM_MIN_SPEECH_MS = 900;
 
 const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
@@ -47,6 +46,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const [captureMode, setCaptureMode] = useState('');
   const [displayText, setDisplayText] = useState('');
   const [statusHint, setStatusHint] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
 
   const streamsRef = useRef([]);
@@ -134,6 +134,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     setCaptureMode('');
     setDisplayText('');
     setStatusHint('');
+    setIsSpeaking(false);
 
     lastProcessedTranscriptRef.current = { normalized: '', at: 0 };
 
@@ -160,14 +161,11 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       const isDuplicate =
         normalized &&
         normalized === lastProcessedTranscriptRef.current.normalized &&
-        now - lastProcessedTranscriptRef.current.at < 45000;
-      const tooSoon =
-        systemListen && now - lastProcessedTranscriptRef.current.at < 4000;
+        now - lastProcessedTranscriptRef.current.at < 30000;
 
       if (
         text.length >= MIN_TEXT_LENGTH &&
         !isDuplicate &&
-        !tooSoon &&
         shouldProcessVoiceTranscript(text, { systemListen }) &&
         onFinalTranscriptRef.current
       ) {
@@ -213,8 +211,9 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     const duration = Date.now() - speechStartedAtRef.current;
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
+    setIsSpeaking(false);
 
-    if (duration < (modeRef.current === 'system' ? SYSTEM_MIN_SPEECH_MS : MIN_SPEECH_MS)) {
+    if (duration < MIN_SPEECH_MS) {
       skipProcessRef.current = true;
       segmentChunksRef.current = [];
       if (mediaRecorderRef.current?.state === 'recording') {
@@ -234,6 +233,8 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       speechStartedAtRef.current = Date.now();
     }
     silenceStartedAtRef.current = null;
+    setIsSpeaking(true);
+    setStatusHint('Speech detected...');
     armRecorder();
   }, [armRecorder]);
 
@@ -376,6 +377,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
         preferCurrentTab: false,
         selfBrowserSurface: 'exclude',
         systemAudio: 'include',
+        surfaceSwitching: 'exclude',
         monitorTypeSurfaces: 'include',
       });
     } catch (err) {
@@ -387,7 +389,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (!audioTracks.length) {
       displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No audio detected.\n\nChoose Window or Entire Screen (with audio enabled). Avoid sharing the Meet tab directly — that keeps the meeting tab clean.'
+        'No audio detected.\n\nChoose a Window or Entire Screen with audio enabled. Do not pick a Chrome tab — that avoids the "Sharing tab to..." banner.'
       );
       return;
     }
@@ -459,6 +461,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     isSupported,
     displayText,
     statusHint,
+    isSpeaking,
     toggleMicListening,
     toggleSystemListening,
     stopListening,
