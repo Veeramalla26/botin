@@ -154,6 +154,7 @@ export default function App() {
   const notesEditingRef = useRef(false);
   const promptEditingRef = useRef(false);
   const isGeneratingRef = useRef(false);
+  const prevSessionIdRef = useRef(null);
   const sessionRef = useRef(null);
   const loadingRef = useRef(false);
   const userRef = useRef(null);
@@ -217,6 +218,13 @@ export default function App() {
         if (recent) {
           await firestoreApi.setActiveSession(user.uid, recent.id);
           setSession(recent);
+        } else {
+          const sess = await firestoreApi.createSession(
+            user.uid,
+            user.displayName || user.email,
+            ''
+          );
+          setSession(sess);
         }
       }
       setSessionResolving(false);
@@ -227,6 +235,8 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.id) return undefined;
+    if (prevSessionIdRef.current === session.id) return undefined;
+    prevSessionIdRef.current = session.id;
 
     setPrompt('');
     setNotes('');
@@ -288,19 +298,12 @@ export default function App() {
   };
 
   const handleJoin = async (userName, company) => {
+    const existing = await firestoreApi.getActiveSession(user.uid);
+    if (existing) {
+      setSession(existing);
+      return;
+    }
     const sess = await firestoreApi.createSession(user.uid, userName, company);
-    setSession(sess);
-  };
-
-  const handleNewSession = async () => {
-    if (!user) return;
-    if (!confirm('Start a new session? All devices on this account will switch to it.')) return;
-    stopListeningRef.current();
-    const sess = await firestoreApi.createSession(
-      user.uid,
-      user.displayName || user.email,
-      session?.company || ''
-    );
     setSession(sess);
   };
 
@@ -310,7 +313,7 @@ export default function App() {
     promptTimerRef.current = setTimeout(() => {
       firestoreApi.saveUiState(userRef.current.uid, sessionRef.current.id, { prompt: value }).catch(() => {});
       promptEditingRef.current = false;
-    }, 500);
+    }, 200);
   }, []);
 
   const syncDraftRemote = useCallback((draft) => {
@@ -511,7 +514,7 @@ export default function App() {
       } else {
         notesEditingRef.current = false;
       }
-    }, 1000);
+    }, 400);
   };
 
   const handlePromptChange = (value) => {
@@ -549,6 +552,7 @@ export default function App() {
   const handleSignOut = async () => {
     stopListeningRef.current();
     await signOut(auth);
+    prevSessionIdRef.current = null;
     setSession(null);
     setResponses([]);
     setNotes('');
@@ -565,7 +569,15 @@ export default function App() {
       </div>
     );
   }
-  if (!session) return <SessionSetup user={user} onJoin={handleJoin} waitingForSync={false} />;
+  if (!session) {
+    return (
+      <SessionSetup
+        user={user}
+        onJoin={handleJoin}
+        waitingForSync
+      />
+    );
+  }
 
   const sessionLabel = session.company
     ? `${session.company} - ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
@@ -631,7 +643,6 @@ export default function App() {
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
           </button>
-          <button className="voice-btn" onClick={handleNewSession} title="Start a new synced session">New Session</button>
           <button className="voice-btn" onClick={handleSignOut} title="Sign out">Sign Out</button>
           <div className="avatar">👤</div>
         </div>
