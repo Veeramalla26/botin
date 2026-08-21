@@ -364,6 +364,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
+          displaySurface: 'window',
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 5 },
@@ -389,7 +390,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (!audioTracks.length) {
       displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No audio detected.\n\nChoose a Window or Entire Screen with audio enabled. Do not pick a Chrome tab — that avoids the "Sharing tab to..." banner.'
+        'No audio detected.\n\nChoose a Window (with audio enabled). Do not pick a Chrome tab — that avoids the "Sharing tab to..." banner on Meet.'
       );
       return;
     }

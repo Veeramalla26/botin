@@ -8,6 +8,7 @@ import { useHideApp } from './hooks/useHideApp';
 import { useFloatingPanel, useResponseSync, markExplicitPanelClose, CHANNEL_NAME } from './hooks/useFloatingPanel';
 import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
+import SystemListenIndicator from './components/SystemListenIndicator';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
 import { shouldProcessVoiceTranscript } from './utils/transcriptFilter';
@@ -1294,6 +1295,9 @@ export default function App() {
   return (
     <div className={`app${isPopout ? ' popout' : ''}${isHidden ? ' app-hidden' : ''}`}>
       {isHidden && <StealthOverlay />}
+      {isSystemListening && !isPopout && (
+        <SystemListenIndicator onStop={stopListening} />
+      )}
       {renderInPanel(
         <FloatingResponsePanel
           responses={responses}
@@ -1350,7 +1354,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share a Window or Entire Screen with audio (not a Chrome tab)'
+                : 'Capture Meet audio — share a Window with audio (not a Chrome tab)'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
