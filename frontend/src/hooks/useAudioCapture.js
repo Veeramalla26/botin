@@ -2,8 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { transcribeAudio } from '../services/api';
 import { shouldProcessVoiceTranscript } from '../utils/transcriptFilter';
 
-const SYSTEM_LISTEN_TITLE = 'Google Meet';
-
 const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
 const SYSTEM_ARM_THRESHOLD = 0.005;
@@ -65,7 +63,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const transcriptionQueueRef = useRef([]);
-  const previousTitleRef = useRef('');
   const lastProcessedTranscriptRef = useRef({ normalized: '', at: 0 });
 
   useEffect(() => {
@@ -97,8 +94,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   }, []);
 
   const cleanup = useCallback(() => {
-    const wasSystem = modeRef.current === 'system';
-
     if (checkIntervalRef.current) {
       clearInterval(checkIntervalRef.current);
       checkIntervalRef.current = null;
@@ -137,11 +132,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     setIsSpeaking(false);
 
     lastProcessedTranscriptRef.current = { normalized: '', at: 0 };
-
-    if (wasSystem && previousTitleRef.current) {
-      document.title = previousTitleRef.current;
-      previousTitleRef.current = '';
-    }
   }, []);
 
   const drainTranscriptionQueue = useCallback(async () => {
@@ -407,9 +397,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     streamsRef.current.push(displayStream);
 
     const systemStream = new MediaStream([...audioTracks]);
-
-    previousTitleRef.current = document.title;
-    document.title = SYSTEM_LISTEN_TITLE;
 
     await beginCapture(
       'system',
