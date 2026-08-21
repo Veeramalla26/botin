@@ -138,7 +138,7 @@ body {
 .header {
   background: var(--color-teal);
   color: white;
-  padding: 0.85rem 1.25rem;
+  padding: 0.45rem 1.15rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -147,17 +147,19 @@ body {
 }
 
 .header-left h1 {
-  font-size: 1.35rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: 0;
+  line-height: 1.2;
 }
 
 .session-info {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   opacity: 0.92;
-  margin-top: 0.15rem;
+  margin-top: 0.05rem;
   display: block;
   font-weight: 400;
+  line-height: 1.25;
 }
 
 .header-right {
@@ -168,13 +170,13 @@ body {
 }
 
 .voice-btn {
-  padding: 0.45rem 0.85rem;
+  padding: 0.32rem 0.7rem;
   border: none;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.18);
   color: white;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.78rem;
   font-weight: 600;
   transition: background 0.18s;
 }
@@ -216,8 +218,8 @@ body {
 .user-menu-trigger {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.45rem 0.2rem 0.2rem;
+  gap: 0.35rem;
+  padding: 0.12rem 0.35rem 0.12rem 0.12rem;
   border: none;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
@@ -232,15 +234,15 @@ body {
 }
 
 .user-menu-trigger-avatar {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.25);
   border: 2px solid rgba(255, 255, 255, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: white;
@@ -888,19 +890,30 @@ body {
   grid-template-columns: 1fr 2fr;
   flex: 1;
   min-height: 0;
-  padding: 1rem 1.25rem;
-  gap: 1rem;
+  padding: 0.6rem 1rem;
+  gap: 0.75rem;
   overflow: hidden;
   background: var(--color-bg);
+}
+
+.left-panel,
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .left-panel label,
 .right-panel > label {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: var(--color-text);
   text-transform: none;
   letter-spacing: 0;
+  flex-shrink: 0;
+  margin-bottom: 0;
 }
 
 /* Prompt section */
@@ -958,15 +971,6 @@ textarea:focus {
   border-color: var(--color-teal);
   box-shadow: 0 0 0 2px rgba(23, 162, 184, 0.2);
   background: var(--color-surface);
-}
-
-.left-panel,
-.right-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* Buttons — unified infill style (reference design) */
@@ -1076,8 +1080,8 @@ textarea:focus {
   overflow-x: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0.85rem;
-  margin-top: 0.35rem;
+  padding: 0.65rem;
+  margin-top: 0.15rem;
   background: var(--color-surface);
 }
 
@@ -1090,8 +1094,8 @@ textarea:focus {
 }
 
 .response-item {
-  margin-bottom: 1rem;
-  padding: 0.85rem;
+  margin-bottom: 0.65rem;
+  padding: 0.65rem 0.7rem;
   background: var(--color-surface);
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-light);
@@ -1198,14 +1202,14 @@ textarea:focus {
 .response-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.65rem;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
   flex-shrink: 0;
 }
 
 .response-footer .btn {
-  padding: 0.5rem 1rem;
-  font-size: 0.85rem;
+  padding: 0.42rem 0.85rem;
+  font-size: 0.8125rem;
 }
 
 /* Modal */
