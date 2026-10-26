@@ -1,5 +1,5 @@
 const { createOpenAI } = require('@ai-sdk/openai');
-const { streamText } = require('ai');
+const { streamText, generateText } = require('ai');
 const { MODE_PROMPTS, buildUserMessage, inferMode, isFollowUpQuestion } = require('./lib/prompts');
 const { resolveOpenAIModel, extractErrorMessage } = require('./lib/openaiModel');
 
@@ -7,7 +7,7 @@ const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-module.exports = async (req, res) => {
+function applyCors(res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -15,6 +15,39 @@ module.exports = async (req, res) => {
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
+}
+
+function beginTextResponse(res) {
+  if (res.headersSent) return;
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+}
+
+function endResponse(res) {
+  if (!res.writableEnded) {
+    res.end();
+  }
+}
+
+function writeChunk(res, chunk) {
+  const text = typeof chunk === 'string' ? chunk : String(chunk);
+  if (!text) return;
+  beginTextResponse(res);
+  res.write(text);
+  if (typeof res.flush === 'function') {
+    res.flush();
+  }
+}
+
+async function generateFullText(params) {
+  const generated = await generateText(params);
+  return (generated.text || '').trim();
+}
+
+module.exports = async (req, res) => {
+  applyCors(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -56,56 +89,59 @@ module.exports = async (req, res) => {
       effectiveMode === 'brief' ? 350 : effectiveMode === 'code' ? 900 : effectiveMode === 'send' ? 500 : 800;
     const temperature = followUp ? 0.6 : effectiveMode === 'code' ? 0.65 : effectiveMode === 'brief' ? 0.75 : 0.82;
 
-    const result = streamText({
+    const modelParams = {
       model: openai(resolveOpenAIModel()),
       system: systemPrompt,
       prompt: userMessage,
       temperature,
       maxTokens,
-      maxRetries: 1,
-    });
+      maxRetries: 2,
+    };
 
     let started = false;
-    let streamError = null;
 
-    for await (const part of result.fullStream) {
-      if (part.type === 'error') {
-        streamError = part.error;
-        break;
-      }
+    try {
+      const result = streamText(modelParams);
 
-      if (part.type === 'text-delta' && part.textDelta) {
-        if (!started) {
-          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-          started = true;
-        }
-        res.write(part.textDelta);
+      for await (const delta of result.textStream) {
+        if (!delta) continue;
+        started = true;
+        writeChunk(res, delta);
       }
-    }
-
-    if (streamError) {
-      console.error('Chat stream error:', streamError);
-      if (!started) {
-        return res.status(500).json({ error: extractErrorMessage(streamError) });
+    } catch (streamErr) {
+      console.error('Chat stream error:', streamErr);
+      if (started) {
+        endResponse(res);
+        return;
       }
-      if (!res.writableEnded) {
-        res.end();
-      }
-      return;
     }
 
     if (!started) {
-      return res.status(500).json({
-        error:
-          'Model returned no output. Set Vercel OPENAI_MODEL to gpt-4o-mini and verify OpenAI billing/credits.',
-      });
+      try {
+        const text = await generateFullText(modelParams);
+        if (!text) {
+          return res.status(500).json({
+            error:
+              'Model returned no output. Set Vercel OPENAI_MODEL to gpt-4o-mini and verify OpenAI billing/credits.',
+          });
+        }
+        writeChunk(res, text);
+      } catch (genErr) {
+        console.error('Chat generate error:', genErr);
+        if (!res.headersSent) {
+          return res.status(500).json({ error: extractErrorMessage(genErr) });
+        }
+        endResponse(res);
+        return;
+      }
     }
 
-    res.end();
+    endResponse(res);
   } catch (err) {
     console.error('Chat API error:', err);
     if (!res.headersSent) {
       return res.status(500).json({ error: extractErrorMessage(err) });
     }
+    endResponse(res);
   }
 };

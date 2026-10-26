@@ -5,7 +5,8 @@
   "framework": null,
   "functions": {
     "api/chat.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "memory": 1024
     },
     "api/transcribe.js": {
       "maxDuration": 60,
