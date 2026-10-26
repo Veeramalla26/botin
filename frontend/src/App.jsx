@@ -959,6 +959,12 @@ export default function App() {
         }
       );
 
+      if (!responseText?.trim()) {
+        throw new Error(
+          'The server returned an empty answer. Check Vercel OPENAI_MODEL (use gpt-4o-mini) and OpenAI billing/credits.'
+        );
+      }
+
       const saved = await firestoreApi.saveResponse(userRef.current.uid, sessionRef.current.id, {
         prompt: text || questionText,
         response: responseText,
