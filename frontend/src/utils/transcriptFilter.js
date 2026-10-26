@@ -160,7 +160,7 @@ export function normalizeTranscript(text) {
 export function hasQuestionIntent(text, normalized = normalizeTranscript(text)) {
   return (
     /[?]/.test(text) ||
-    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|walk me through)\b/i.test(
+    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|discuss|introduce|implement|walk me through|tell me|talk about|difference between|example of|your experience)\b/i.test(
       normalized
     )
   );
@@ -252,12 +252,14 @@ export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}
   }
 
   const normalized = normalizeTranscript(text);
+  const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (systemListen && !hasQuestionIntent(text, normalized)) {
+  if (systemListen && wordCount < 3) {
     return false;
   }
 
-  if (systemListen && normalized.split(' ').length < 3) {
+  // Keep short system-listen clips question-like; longer utterances are usually real prompts.
+  if (systemListen && wordCount < 6 && !hasQuestionIntent(text, normalized)) {
     return false;
   }
 

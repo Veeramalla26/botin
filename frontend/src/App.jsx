@@ -1356,7 +1356,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share a Window with audio (not a Chrome tab)'
+                : 'Capture Meet audio — share the Meet tab, a Window, or Entire Screen with audio enabled'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
@@ -1420,7 +1420,7 @@ export default function App() {
                   ? (voiceStatusHint || 'System Listen is active — listening for real interview questions from shared audio.')
                   : isMicListening
                     ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
-                    : 'Click Listen for microphone, or System Listen and share a window/screen with audio enabled (Google Meet, YouTube, etc.).'}
+                    : 'Click Listen for microphone, or System Listen and share a tab/window/screen with audio enabled (Google Meet, YouTube, etc.).'}
               </div>
             )}
             {streamingResponse && (
