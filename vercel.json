@@ -7,10 +7,6 @@
     "api/chat.js": {
       "maxDuration": 60
     },
-    "api/transcribe.js": {
-      "maxDuration": 60,
-      "memory": 1024
-    },
     "api/resume-parse.js": {
       "maxDuration": 30
     }
