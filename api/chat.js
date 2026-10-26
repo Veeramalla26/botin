@@ -1,6 +1,7 @@
 const { createOpenAI } = require('@ai-sdk/openai');
 const { streamText } = require('ai');
 const { MODE_PROMPTS, buildUserMessage, inferMode, isFollowUpQuestion } = require('./lib/prompts');
+const { resolveOpenAIModel, extractErrorMessage } = require('./lib/openaiModel');
 
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -56,18 +57,55 @@ module.exports = async (req, res) => {
     const temperature = followUp ? 0.6 : effectiveMode === 'code' ? 0.65 : effectiveMode === 'brief' ? 0.75 : 0.82;
 
     const result = streamText({
-      model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+      model: openai(resolveOpenAIModel()),
       system: systemPrompt,
       prompt: userMessage,
       temperature,
       maxTokens,
+      maxRetries: 1,
     });
 
-    result.pipeTextStreamToResponse(res);
+    let started = false;
+    let streamError = null;
+
+    for await (const part of result.fullStream) {
+      if (part.type === 'error') {
+        streamError = part.error;
+        break;
+      }
+
+      if (part.type === 'text-delta' && part.textDelta) {
+        if (!started) {
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          started = true;
+        }
+        res.write(part.textDelta);
+      }
+    }
+
+    if (streamError) {
+      console.error('Chat stream error:', streamError);
+      if (!started) {
+        return res.status(500).json({ error: extractErrorMessage(streamError) });
+      }
+      if (!res.writableEnded) {
+        res.end();
+      }
+      return;
+    }
+
+    if (!started) {
+      return res.status(500).json({
+        error:
+          'Model returned no output. Set Vercel OPENAI_MODEL to gpt-4o-mini and verify OpenAI billing/credits.',
+      });
+    }
+
+    res.end();
   } catch (err) {
     console.error('Chat API error:', err);
     if (!res.headersSent) {
-      return res.status(500).json({ error: err.message || 'Failed to generate response' });
+      return res.status(500).json({ error: extractErrorMessage(err) });
     }
   }
 };
