@@ -15,7 +15,19 @@ function resolveOpenAIModel() {
   return configured;
 }
 
+function extractErrorMessage(err) {
+  if (!err) return 'Request failed';
+  if (err.lastError?.message) return err.lastError.message;
+  if (Array.isArray(err.errors) && err.errors.length) {
+    const last = err.errors[err.errors.length - 1];
+    if (last?.message) return last.message;
+  }
+  if (typeof err.message === 'string' && err.message.trim()) return err.message.trim();
+  return 'Request failed';
+}
+
 module.exports = {
   resolveOpenAIModel,
+  extractErrorMessage,
   FALLBACK_MODEL,
 };

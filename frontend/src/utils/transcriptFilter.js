@@ -160,7 +160,7 @@ export function normalizeTranscript(text) {
 export function hasQuestionIntent(text, normalized = normalizeTranscript(text)) {
   return (
     /[?]/.test(text) ||
-    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|walk me through)\b/i.test(
+    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|discuss|introduce|implement|versus|vs|walk me through|tell me|talk about|difference between|example of|your experience)\b/i.test(
       normalized
     )
   );
@@ -177,7 +177,8 @@ function hasExcessiveRepetition(normalized) {
   const sentenceCounts = new Map();
   for (const sentence of sentences) {
     sentenceCounts.set(sentence, (sentenceCounts.get(sentence) || 0) + 1);
-    if (sentenceCounts.get(sentence) >= 2) {
+    // Interviewers often repeat a question once; drop only webinar-style loops.
+    if (sentenceCounts.get(sentence) >= 3) {
       return true;
     }
   }
@@ -221,13 +222,13 @@ export function isSpuriousTranscript(text) {
     return true;
   }
 
-  if (hasExcessiveRepetition(normalized)) {
+  if (!hasQuestion && hasExcessiveRepetition(normalized)) {
     return true;
   }
 
-  const wordCount = normalized.split(' ').length;
+  const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (!hasQuestion && wordCount <= 3 && normalized.length <= 24) {
+  if (!hasQuestion && wordCount <= 2 && normalized.length <= 24) {
     return true;
   }
 
@@ -252,12 +253,14 @@ export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}
   }
 
   const normalized = normalizeTranscript(text);
+  const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (systemListen && !hasQuestionIntent(text, normalized)) {
+  if (systemListen && wordCount < 3) {
     return false;
   }
 
-  if (systemListen && normalized.split(' ').length < 3) {
+  // Short clips still need to look like a prompt; longer ones are usually real questions.
+  if (systemListen && wordCount < 5 && !hasQuestionIntent(text, normalized)) {
     return false;
   }
 

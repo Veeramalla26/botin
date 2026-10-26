@@ -651,7 +651,7 @@ export default function App() {
   const userRef = useRef(null);
   const resetTranscriptRef = useRef(() => {});
   const stopListeningRef = useRef(() => {});
-  const pendingVoiceTranscriptRef = useRef(null);
+  const pendingVoiceTranscriptRef = useRef([]);
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
   const isFloatOpenRef = useRef(false);
@@ -959,6 +959,10 @@ export default function App() {
         }
       );
 
+      if (!responseText?.trim()) {
+        throw new Error('The server returned an empty answer. Tap Send to retry.');
+      }
+
       const saved = await firestoreApi.saveResponse(userRef.current.uid, sessionRef.current.id, {
         prompt: text || questionText,
         response: responseText,
@@ -1005,11 +1009,11 @@ export default function App() {
         }
       }
 
-      const pending = pendingVoiceTranscriptRef.current;
-      if (pending) {
-        pendingVoiceTranscriptRef.current = null;
-        if (shouldProcessVoiceTranscript(pending.text, { systemListen: pending.systemListen })) {
-          handleGenerate('send', pending.text);
+      const queue = pendingVoiceTranscriptRef.current;
+      if (queue.length) {
+        const next = queue.shift();
+        if (next && shouldProcessVoiceTranscript(next.text, { systemListen: next.systemListen })) {
+          handleGenerate('send', next.text);
         }
       }
     }
@@ -1023,7 +1027,12 @@ export default function App() {
     if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) return;
 
     if (loadingRef.current || isGeneratingRef.current) {
-      pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
+      const queue = pendingVoiceTranscriptRef.current;
+      const last = queue[queue.length - 1];
+      if (!last || last.text !== cleaned) {
+        if (queue.length >= 3) queue.shift();
+        queue.push({ text: cleaned, systemListen });
+      }
       return;
     }
 
@@ -1350,7 +1359,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share a Window with audio (not a Chrome tab)'
+                : 'Capture Meet audio — share the Meet tab, a Window, or Entire Screen with audio enabled'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
