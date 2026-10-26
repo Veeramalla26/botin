@@ -1024,13 +1024,16 @@ export default function App() {
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
-    if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) return;
+    if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) {
+      console.info('[voice] skipped noise:', cleaned);
+      return;
+    }
 
     if (loadingRef.current || isGeneratingRef.current) {
       const queue = pendingVoiceTranscriptRef.current;
       const last = queue[queue.length - 1];
       if (!last || last.text !== cleaned) {
-        if (queue.length >= 3) queue.shift();
+        if (queue.length >= 6) queue.shift();
         queue.push({ text: cleaned, systemListen });
       }
       return;

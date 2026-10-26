@@ -160,7 +160,7 @@ export function normalizeTranscript(text) {
 export function hasQuestionIntent(text, normalized = normalizeTranscript(text)) {
   return (
     /[?]/.test(text) ||
-    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|discuss|introduce|implement|versus|vs|walk me through|tell me|talk about|difference between|example of|your experience)\b/i.test(
+    /\b(what|why|how|when|where|who|which|can|could|would|should|do|does|did|is|are|was|were|tell|describe|explain|have|has|had|walk|talk|share|give|list|name|define|compare|discuss|introduce|implement|versus|vs|write|program|code|function|algorithm|example|sort|search|walk me through|tell me|talk about|difference between|example of|your experience)\b/i.test(
       normalized
     )
   );
@@ -228,14 +228,6 @@ export function isSpuriousTranscript(text) {
 
   const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (!hasQuestion && wordCount <= 2 && normalized.length <= 24) {
-    return true;
-  }
-
-  if (!hasQuestion && normalized.length <= 6) {
-    return true;
-  }
-
   if (
     !hasQuestion &&
     wordCount <= 8 &&
@@ -255,14 +247,18 @@ export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}
   const normalized = normalizeTranscript(text);
   const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (systemListen && wordCount < 3) {
+  if (wordCount >= 2) {
+    return true;
+  }
+
+  // Allow a single technical term ("Python", "React") but not filler already in SPURIOUS_PHRASES.
+  if (wordCount === 1 && normalized.length >= 4) {
+    return true;
+  }
+
+  if (systemListen) {
     return false;
   }
 
-  // Short clips still need to look like a prompt; longer ones are usually real questions.
-  if (systemListen && wordCount < 5 && !hasQuestionIntent(text, normalized)) {
-    return false;
-  }
-
-  return true;
+  return normalized.length >= 3;
 }

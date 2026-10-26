@@ -165,14 +165,13 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
             normalized === lastProcessedTranscriptRef.current.normalized &&
             now - lastProcessedTranscriptRef.current.at < 12000;
 
-          if (
-            text.length >= MIN_TEXT_LENGTH &&
-            !isDuplicate &&
-            shouldProcessVoiceTranscript(text, { systemListen }) &&
-            onFinalTranscriptRef.current
-          ) {
-            lastProcessedTranscriptRef.current = { normalized, at: now };
-            onFinalTranscriptRef.current(text, { systemListen });
+          if (text.length >= MIN_TEXT_LENGTH && !isDuplicate && onFinalTranscriptRef.current) {
+            if (!shouldProcessVoiceTranscript(text, { systemListen })) {
+              console.info('[voice] skipped noise:', text);
+            } else {
+              lastProcessedTranscriptRef.current = { normalized, at: now };
+              onFinalTranscriptRef.current(text, { systemListen });
+            }
           }
         }
 
