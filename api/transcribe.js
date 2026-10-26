@@ -22,10 +22,10 @@ function buildForm(bytes, filename, contentType, model) {
   formData.append('language', 'en');
   formData.append('response_format', 'json');
   formData.append('temperature', '0');
-  formData.append(
-    'prompt',
-    process.env.WHISPER_PROMPT || 'Interview question. JavaScript, Python, React, Node.js, SAP, SQL, API.'
-  );
+  const vocabHint = (process.env.WHISPER_PROMPT || '').trim();
+  if (vocabHint) {
+    formData.append('prompt', vocabHint);
+  }
   return formData;
 }
 
@@ -101,7 +101,17 @@ module.exports = async (req, res) => {
     } catch {
       data = { text: body };
     }
-    return res.status(200).json({ text: (data.text || '').trim() });
+    const text = (data.text || '').trim();
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    if (wordCount >= 10 && buffer.length / wordCount < 320) {
+      console.warn('Skipping likely transcribe hallucination', {
+        bytes: buffer.length,
+        wordCount,
+        text: text.slice(0, 120),
+      });
+      return res.status(200).json({ text: '' });
+    }
+    return res.status(200).json({ text });
   } catch (err) {
     console.error('Transcribe API error:', err);
     return res.status(500).json({ error: err.message || 'Failed to transcribe audio' });

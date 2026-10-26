@@ -157,6 +157,11 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
           setStatusHint('Transcription failed — still listening...');
         } else {
           const text = result.text;
+          const wordCount = text.split(/\s+/).filter(Boolean).length;
+          if (wordCount >= 10 && result.bytes && result.bytes / wordCount < 320) {
+            console.info('[voice] skipped likely hallucination:', text);
+            continue;
+          }
           const systemListen = modeRef.current === 'system';
           const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
           const now = Date.now();
@@ -205,7 +210,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       transcribeInFlightRef.current += 1;
       setStatusHint('Transcribing...');
       const job = transcribeAudio(webmBlob, 'audio/webm')
-        .then((text) => ({ ok: true, text: (text || '').trim() }))
+        .then((text) => ({ ok: true, text: (text || '').trim(), bytes: webmBlob.size }))
         .catch((error) => ({ ok: false, error }))
         .finally(() => {
           transcribeInFlightRef.current = Math.max(0, transcribeInFlightRef.current - 1);
