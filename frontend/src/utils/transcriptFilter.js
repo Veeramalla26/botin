@@ -80,6 +80,22 @@ const SPURIOUS_PHRASES = new Set([
   'interview question javascript python react node js sap sql api',
   'interview question javascript python react nodejs sap sql api',
   'job interview question technical terms javascript python react node js sap sql api cloud system design',
+  'chatgpt can you hear me',
+  'chat gpt can you hear me',
+  'chatgpt can you hear me?',
+  'can you hear me',
+  'can you hear me chatgpt',
+  'hello chatgpt',
+  'hey chatgpt',
+  'hi chatgpt',
+  'chatgpt',
+  'chat gpt',
+  'are you there',
+  'are you listening',
+  'testing testing',
+  'test test',
+  'check check',
+  'hello hello',
 ]);
 
 const SPURIOUS_PREFIXES = [
@@ -119,6 +135,13 @@ const SPURIOUS_PREFIXES = [
   "you're welcome",
   'interview question javascript',
   'job interview question',
+  'chatgpt',
+  'chat gpt',
+  'hello chatgpt',
+  'hey chatgpt',
+  'hi chatgpt',
+  'okay chatgpt',
+  'can you hear me',
 ];
 
 const CLOSING_PATTERNS = [
@@ -212,6 +235,10 @@ function isWhisperHintHallucination(normalized) {
   if (normalized.startsWith('interview question') && /\bjavascript\b/.test(normalized) && /\bpython\b/.test(normalized) && /\breact\b/.test(normalized)) {
     return true;
   }
+  if (/\b(chatgpt|chat gpt|openai|gpt-?4)\b/.test(normalized)) return true;
+  if (/\bcan you hear me\b/.test(normalized)) return true;
+  if (/\bare you (there|listening|working|ready)\b/.test(normalized)) return true;
+  if (/^(testing|test test|check check|hello hello)\b/.test(normalized)) return true;
 
   const hintTerms = ['javascript', 'python', 'react', 'sap', 'sql', 'api'];
   const hits = hintTerms.filter((term) => normalized.includes(term)).length;
