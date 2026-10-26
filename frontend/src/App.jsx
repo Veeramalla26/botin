@@ -1036,8 +1036,8 @@ export default function App() {
     const pending = pendingVoiceTranscriptRef.current;
     if (!pending?.text) return;
 
-    if (looksIncompleteQuestion(pending.text) && Date.now() - voiceGatherStartedAtRef.current < 3000) {
-      voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 900);
+    if (looksIncompleteQuestion(pending.text) && Date.now() - voiceGatherStartedAtRef.current < 1600) {
+      voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 400);
       return;
     }
 
@@ -1054,8 +1054,8 @@ export default function App() {
     if (voiceGatherTimerRef.current) {
       clearTimeout(voiceGatherTimerRef.current);
     }
-    const extra = looksIncompleteQuestion(pendingVoiceTranscriptRef.current?.text || '') ? 900 : 0;
-    voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 1400 + extra);
+    const incomplete = looksIncompleteQuestion(pendingVoiceTranscriptRef.current?.text || '');
+    voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, incomplete ? 500 : 60);
   }, [flushVoicePrompt]);
 
   const handleVoiceTranscript = useCallback((text, { systemListen = false } = {}) => {

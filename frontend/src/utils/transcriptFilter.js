@@ -269,12 +269,12 @@ export function looksIncompleteQuestion(text) {
   const normalized = normalizeTranscript(text);
   if (!normalized) return true;
   if (/[?]/.test(text)) return false;
-  if (/\b(of|a|an|the|and|or|for|about|write|program|example|asking|code|function)$/.test(normalized)) {
+  if (/\b(of|a|an|the|and|or|for|about|asking)$/.test(normalized)) {
     return true;
   }
   const words = normalized.split(' ').filter(Boolean);
   return (
-    words.length <= 5 &&
+    words.length <= 3 &&
     /^(write|tell|give|example|program|code|explain|i am asking|i m asking|can you|could you|please)\b/.test(
       normalized
     )
