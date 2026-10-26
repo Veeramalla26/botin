@@ -30,6 +30,9 @@ function writeText(res, chunk) {
   if (!text) return;
   beginTextResponse(res);
   res.write(text);
+  if (typeof res.flush === 'function') {
+    res.flush();
+  }
 }
 
 function modelParams({ systemPrompt, userMessage, temperature, maxTokens }) {
@@ -39,7 +42,7 @@ function modelParams({ systemPrompt, userMessage, temperature, maxTokens }) {
     prompt: userMessage,
     temperature,
     maxTokens,
-    maxRetries: 1,
+    maxRetries: 0,
   };
 }
 
@@ -83,7 +86,7 @@ module.exports = async (req, res) => {
     });
 
     const maxTokens =
-      effectiveMode === 'brief' ? 350 : effectiveMode === 'code' ? 900 : effectiveMode === 'send' ? 500 : 800;
+      effectiveMode === 'brief' ? 280 : effectiveMode === 'code' ? 800 : effectiveMode === 'send' ? 380 : 650;
     const temperature = followUp ? 0.6 : effectiveMode === 'code' ? 0.65 : effectiveMode === 'brief' ? 0.75 : 0.82;
     const params = modelParams({ systemPrompt, userMessage, temperature, maxTokens });
 

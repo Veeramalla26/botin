@@ -52,19 +52,24 @@ export async function parseResumeFile(file) {
   return data.text || '';
 }
 
-export async function transcribeAudio(blob, mimeType = 'audio/webm') {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x10000;
-  const chunks = [];
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read audio'));
+    reader.readAsDataURL(blob);
+  });
+}
 
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize)));
-  }
-  const audio = btoa(chunks.join(''));
+export async function transcribeAudio(blob, mimeType = 'audio/webm') {
+  const audio = await blobToBase64(blob);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 20000);
 
   try {
     const res = await fetch(`${API_BASE}/transcribe`, {

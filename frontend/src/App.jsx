@@ -1108,8 +1108,8 @@ export default function App() {
     resetTranscript,
   } = useAudioCapture({
     onFinalTranscript: handleVoiceTranscript,
-    micSilenceDelay: 650,
-    systemSilenceDelay: 800,
+    micSilenceDelay: 380,
+    systemSilenceDelay: 480,
   });
 
   resetTranscriptRef.current = resetTranscript;

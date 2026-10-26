@@ -6,12 +6,13 @@ const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
 const SYSTEM_ARM_THRESHOLD = 0.005;
 const SYSTEM_SPEECH_THRESHOLD = 0.008;
-const CHECK_INTERVAL_MS = 40;
-const MIN_SPEECH_MS = 550;
+const CHECK_INTERVAL_MS = 32;
+const MIN_SPEECH_MS = 380;
 const MIN_TEXT_LENGTH = 3;
 const SYSTEM_GAIN = 2.5;
-const RECORDER_BITRATE = 64000;
-const RECORDER_TIMESLICE_MS = 100;
+const RECORDER_BITRATE = 24000;
+const RECORDER_TIMESLICE_MS = 80;
+const MAX_TRANSCRIBE_IN_FLIGHT = 2;
 
 function getSupportedMimeType() {
   if (typeof MediaRecorder === 'undefined') return null;
@@ -63,6 +64,9 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const transcriptionQueueRef = useRef([]);
+  const transcribeJobsRef = useRef([]);
+  const transcribeInFlightRef = useRef(0);
+  const deliveringRef = useRef(false);
   const lastProcessedTranscriptRef = useRef({ normalized: '', at: 0 });
 
   useEffect(() => {
@@ -122,6 +126,10 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     activeAnalyserRef.current = null;
     segmentChunksRef.current = [];
     transcriptionQueueRef.current = [];
+    transcribeJobsRef.current = [];
+    transcribeInFlightRef.current = 0;
+    deliveringRef.current = false;
+    processingRef.current = false;
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
     listeningRef.current = false;
@@ -134,42 +142,50 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     lastProcessedTranscriptRef.current = { normalized: '', at: 0 };
   }, []);
 
-  const drainTranscriptionQueue = useCallback(async () => {
-    if (processingRef.current) return;
-
-    const webmBlob = transcriptionQueueRef.current.shift();
-    if (!webmBlob) return;
-
-    processingRef.current = true;
+  const deliverNextTranscript = useCallback(async () => {
+    if (deliveringRef.current) return;
+    deliveringRef.current = true;
 
     try {
-      setStatusHint('Transcribing...');
-      const text = (await transcribeAudio(webmBlob, 'audio/webm')).trim();
-      const systemListen = modeRef.current === 'system';
-      const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
-      const now = Date.now();
-      const isDuplicate =
-        normalized &&
-        normalized === lastProcessedTranscriptRef.current.normalized &&
-        now - lastProcessedTranscriptRef.current.at < 12000;
+      while (transcribeJobsRef.current.length) {
+        const job = transcribeJobsRef.current[0];
+        const result = await job;
+        transcribeJobsRef.current.shift();
 
-      if (
-        text.length >= MIN_TEXT_LENGTH &&
-        !isDuplicate &&
-        shouldProcessVoiceTranscript(text, { systemListen }) &&
-        onFinalTranscriptRef.current
-      ) {
-        lastProcessedTranscriptRef.current = { normalized, at: now };
-        onFinalTranscriptRef.current(text, { systemListen });
+        if (!result.ok) {
+          console.error('Audio transcription error:', result.error);
+          setStatusHint('Transcription failed — still listening...');
+        } else {
+          const text = result.text;
+          const systemListen = modeRef.current === 'system';
+          const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
+          const now = Date.now();
+          const isDuplicate =
+            normalized &&
+            normalized === lastProcessedTranscriptRef.current.normalized &&
+            now - lastProcessedTranscriptRef.current.at < 12000;
+
+          if (
+            text.length >= MIN_TEXT_LENGTH &&
+            !isDuplicate &&
+            shouldProcessVoiceTranscript(text, { systemListen }) &&
+            onFinalTranscriptRef.current
+          ) {
+            lastProcessedTranscriptRef.current = { normalized, at: now };
+            onFinalTranscriptRef.current(text, { systemListen });
+          }
+        }
+
+        if (
+          transcriptionQueueRef.current.length &&
+          transcribeInFlightRef.current < MAX_TRANSCRIBE_IN_FLIGHT
+        ) {
+          drainTranscriptionQueue();
+        }
       }
-    } catch (err) {
-      console.error('Audio transcription error:', err);
-      setStatusHint('Transcription failed — still listening...');
     } finally {
-      processingRef.current = false;
-      if (transcriptionQueueRef.current.length) {
-        drainTranscriptionQueue();
-      } else if (listeningRef.current) {
+      deliveringRef.current = false;
+      if (listeningRef.current && !transcribeJobsRef.current.length && !transcriptionQueueRef.current.length) {
         setStatusHint(
           modeRef.current === 'system'
             ? 'Listening for interview questions...'
@@ -178,6 +194,29 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       }
     }
   }, []);
+
+  const drainTranscriptionQueue = useCallback(() => {
+    while (
+      transcriptionQueueRef.current.length &&
+      transcribeInFlightRef.current < MAX_TRANSCRIBE_IN_FLIGHT
+    ) {
+      const webmBlob = transcriptionQueueRef.current.shift();
+      if (!webmBlob) break;
+
+      transcribeInFlightRef.current += 1;
+      setStatusHint('Transcribing...');
+      const job = transcribeAudio(webmBlob, 'audio/webm')
+        .then((text) => ({ ok: true, text: (text || '').trim() }))
+        .catch((error) => ({ ok: false, error }))
+        .finally(() => {
+          transcribeInFlightRef.current = Math.max(0, transcribeInFlightRef.current - 1);
+          drainTranscriptionQueue();
+        });
+      transcribeJobsRef.current.push(job);
+    }
+
+    deliverNextTranscript();
+  }, [deliverNextTranscript]);
 
   const enqueueRecording = useCallback(() => {
     if (skipProcessRef.current) {
