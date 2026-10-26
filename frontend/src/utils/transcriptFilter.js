@@ -77,6 +77,9 @@ const SPURIOUS_PHRASES = new Set([
   'sorry',
   'excuse me',
   'pardon',
+  'interview question javascript python react node js sap sql api',
+  'interview question javascript python react nodejs sap sql api',
+  'job interview question technical terms javascript python react node js sap sql api cloud system design',
 ]);
 
 const SPURIOUS_PREFIXES = [
@@ -114,6 +117,8 @@ const SPURIOUS_PREFIXES = [
   'sharing a window',
   'you re welcome',
   "you're welcome",
+  'interview question javascript',
+  'job interview question',
 ];
 
 const CLOSING_PATTERNS = [
@@ -200,9 +205,27 @@ function hasExcessiveRepetition(normalized) {
   return false;
 }
 
+function isWhisperHintHallucination(normalized) {
+  if (!normalized) return false;
+  if (normalized.startsWith('interview question javascript')) return true;
+  if (normalized.startsWith('job interview question')) return true;
+  if (normalized.startsWith('interview question') && /\bjavascript\b/.test(normalized) && /\bpython\b/.test(normalized) && /\breact\b/.test(normalized)) {
+    return true;
+  }
+
+  const hintTerms = ['javascript', 'python', 'react', 'sap', 'sql', 'api'];
+  const hits = hintTerms.filter((term) => normalized.includes(term)).length;
+  const words = normalized.split(' ').filter(Boolean);
+  return hits >= 5 && words.length <= 22;
+}
+
 export function isSpuriousTranscript(text) {
   const normalized = normalizeTranscript(text);
   if (!normalized) return true;
+
+  if (isWhisperHintHallucination(normalized)) {
+    return true;
+  }
 
   if (SPURIOUS_PHRASES.has(normalized)) {
     return true;
