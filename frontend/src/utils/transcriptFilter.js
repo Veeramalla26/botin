@@ -239,6 +239,52 @@ export function isSpuriousTranscript(text) {
   return false;
 }
 
+const CONTINUATION_PREFIX =
+  /^(of|and|or|for|in|on|with|using|like|about|from|to|the|a|an|it|this|that|also|then|now|please|just|same)\b/;
+
+export function looksIncompleteQuestion(text) {
+  const normalized = normalizeTranscript(text);
+  if (!normalized) return true;
+  if (/[?]/.test(text)) return false;
+  if (/\b(of|a|an|the|and|or|for|about|write|program|example|asking|code|function)$/.test(normalized)) {
+    return true;
+  }
+  const words = normalized.split(' ').filter(Boolean);
+  return (
+    words.length <= 5 &&
+    /^(write|tell|give|example|program|code|explain|i am asking|i m asking|can you|could you|please)\b/.test(
+      normalized
+    )
+  );
+}
+
+export function isVoiceContinuation(previous, next) {
+  const prev = normalizeTranscript(previous);
+  const nextN = normalizeTranscript(next);
+  if (!prev || !nextN) return false;
+  if (nextN === prev) return true;
+  if (prev.includes(nextN) || nextN.includes(prev)) return true;
+
+  const nextWords = nextN.split(' ').filter(Boolean).length;
+  if (nextWords > 12) return false;
+  if (CONTINUATION_PREFIX.test(nextN) && nextWords <= 10) return true;
+  if (looksIncompleteQuestion(previous) && nextWords <= 10) return true;
+  if (/\b(it|this|that|same|previous)\b/.test(nextN) && nextWords <= 10) return true;
+  return false;
+}
+
+export function mergeVoiceTranscripts(previous, next) {
+  const prev = (previous || '').trim();
+  const nxt = (next || '').trim();
+  if (!prev) return nxt;
+  if (!nxt) return prev;
+  const prevN = normalizeTranscript(prev);
+  const nextN = normalizeTranscript(nxt);
+  if (prevN.includes(nextN)) return prev;
+  if (nextN.includes(prevN)) return nxt;
+  return `${prev} ${nxt}`.replace(/\s+/g, ' ');
+}
+
 export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}) {
   if (isSpuriousTranscript(text)) {
     return false;

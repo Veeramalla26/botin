@@ -10,7 +10,12 @@ import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
-import { shouldProcessVoiceTranscript } from './utils/transcriptFilter';
+import {
+  shouldProcessVoiceTranscript,
+  isVoiceContinuation,
+  mergeVoiceTranscripts,
+  looksIncompleteQuestion,
+} from './utils/transcriptFilter';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -651,7 +656,10 @@ export default function App() {
   const userRef = useRef(null);
   const resetTranscriptRef = useRef(() => {});
   const stopListeningRef = useRef(() => {});
-  const pendingVoiceTranscriptRef = useRef([]);
+  const pendingVoiceTranscriptRef = useRef(null);
+  const voiceGatherTimerRef = useRef(null);
+  const voiceGatherStartedAtRef = useRef(0);
+  const lastSubmittedVoiceRef = useRef({ text: '', at: 0 });
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
   const isFloatOpenRef = useRef(false);
@@ -1009,15 +1017,46 @@ export default function App() {
         }
       }
 
-      const queue = pendingVoiceTranscriptRef.current;
-      if (queue.length) {
-        const next = queue.shift();
-        if (next && shouldProcessVoiceTranscript(next.text, { systemListen: next.systemListen })) {
-          handleGenerate('send', next.text);
+      const pending = pendingVoiceTranscriptRef.current;
+      if (pending?.text && !voiceGatherTimerRef.current) {
+        const justAsked = lastSubmittedVoiceRef.current.text;
+        if (isVoiceContinuation(justAsked, pending.text) || isVoiceContinuation(pending.text, justAsked)) {
+          pendingVoiceTranscriptRef.current = null;
+        } else {
+          pendingVoiceTranscriptRef.current = null;
+          lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
+          handleGenerate('send', pending.text);
         }
       }
     }
   };
+
+  const flushVoicePrompt = useCallback(() => {
+    voiceGatherTimerRef.current = null;
+    const pending = pendingVoiceTranscriptRef.current;
+    if (!pending?.text) return;
+
+    if (looksIncompleteQuestion(pending.text) && Date.now() - voiceGatherStartedAtRef.current < 3000) {
+      voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 900);
+      return;
+    }
+
+    if (loadingRef.current || isGeneratingRef.current) {
+      return;
+    }
+
+    pendingVoiceTranscriptRef.current = null;
+    lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
+    handleGenerate('send', pending.text);
+  }, []);
+
+  const scheduleVoiceFlush = useCallback(() => {
+    if (voiceGatherTimerRef.current) {
+      clearTimeout(voiceGatherTimerRef.current);
+    }
+    const extra = looksIncompleteQuestion(pendingVoiceTranscriptRef.current?.text || '') ? 900 : 0;
+    voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 1400 + extra);
+  }, [flushVoicePrompt]);
 
   const handleVoiceTranscript = useCallback((text, { systemListen = false } = {}) => {
     if (!sessionRef.current || !userRef.current) return;
@@ -1029,18 +1068,46 @@ export default function App() {
       return;
     }
 
-    if (loadingRef.current || isGeneratingRef.current) {
-      const queue = pendingVoiceTranscriptRef.current;
-      const last = queue[queue.length - 1];
-      if (!last || last.text !== cleaned) {
-        if (queue.length >= 6) queue.shift();
-        queue.push({ text: cleaned, systemListen });
-      }
+    const pending = pendingVoiceTranscriptRef.current;
+    const lastAsked = lastSubmittedVoiceRef.current.text;
+    const askedRecently = Date.now() - lastSubmittedVoiceRef.current.at < 8000;
+
+    if (pending && (isVoiceContinuation(pending.text, cleaned) || looksIncompleteQuestion(pending.text))) {
+      pending.text = mergeVoiceTranscripts(pending.text, cleaned);
+      pending.systemListen = systemListen;
+      scheduleVoiceFlush();
       return;
     }
 
-    handleGenerate('send', cleaned);
-  }, []);
+    if ((loadingRef.current || isGeneratingRef.current) && askedRecently && isVoiceContinuation(lastAsked, cleaned)) {
+      lastSubmittedVoiceRef.current.text = mergeVoiceTranscripts(lastAsked, cleaned);
+      return;
+    }
+
+    if (loadingRef.current || isGeneratingRef.current) {
+      pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
+      return;
+    }
+
+    if (pending && !isVoiceContinuation(pending.text, cleaned) && !looksIncompleteQuestion(pending.text)) {
+      if (voiceGatherTimerRef.current) {
+        clearTimeout(voiceGatherTimerRef.current);
+        voiceGatherTimerRef.current = null;
+      }
+      pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
+      voiceGatherStartedAtRef.current = Date.now();
+      lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
+      handleGenerate('send', pending.text);
+      scheduleVoiceFlush();
+      return;
+    }
+
+    if (!pending) {
+      voiceGatherStartedAtRef.current = Date.now();
+    }
+    pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
+    scheduleVoiceFlush();
+  }, [scheduleVoiceFlush]);
 
   const {
     hideApp,
@@ -1118,7 +1185,15 @@ export default function App() {
   resetTranscriptRef.current = resetTranscript;
   stopListeningRef.current = stopListening;
 
-  useEffect(() => () => stopListeningRef.current(), []);
+  useEffect(
+    () => () => {
+      if (voiceGatherTimerRef.current) {
+        clearTimeout(voiceGatherTimerRef.current);
+      }
+      stopListeningRef.current();
+    },
+    []
+  );
 
   const handleFixedQuestion = async (question) => {
     setShowFixedModal(false);
