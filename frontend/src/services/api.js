@@ -93,27 +93,7 @@ export async function transcribeAudio(blob, mimeType = 'audio/webm') {
   }
 }
 
-function isRetryableNetworkError(err) {
-  const msg = String(err?.message || err || '').toLowerCase();
-  return (
-    err?.name === 'TypeError' ||
-    msg.includes('network error') ||
-    msg.includes('failed to fetch') ||
-    msg.includes('load failed') ||
-    msg.includes('connection') ||
-    msg.includes('reset') ||
-    msg.includes('aborted')
-  );
-}
-
-function toChatUserError(err) {
-  if (isRetryableNetworkError(err)) {
-    return new Error('Connection dropped while generating. Tap Send to retry.');
-  }
-  return err instanceof Error ? err : new Error(String(err || 'Generation failed'));
-}
-
-async function streamChatResponseOnce(
+export async function streamChatResponse(
   { prompt, mode, questionText, previousResponse, conversationHistory, resumeText },
   onChunk
 ) {
@@ -143,49 +123,21 @@ async function streamChatResponseOnce(
   }
 
   if (!res.body) {
-    const text = await res.text();
-    if (text) onChunk(text);
-    return text;
+    return res.text();
   }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let text = '';
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += decoder.decode(value, { stream: true });
-      onChunk(text);
-    }
-    text += decoder.decode();
-    if (text) onChunk(text);
-    return text;
-  } catch (err) {
-    text += decoder.decode();
-    if (text.trim().length >= 24) {
-      onChunk(text);
-      return text;
-    }
-    throw err;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    onChunk(text);
   }
-}
 
-export async function streamChatResponse(payload, onChunk) {
-  let lastError;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      return await streamChatResponseOnce(payload, onChunk);
-    } catch (err) {
-      lastError = err;
-      if (!isRetryableNetworkError(err) || attempt === 1) {
-        throw toChatUserError(err);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-  }
-  throw toChatUserError(lastError);
+  return text;
 }
 
 export function buildHeading(prompt, mode, questionText) {

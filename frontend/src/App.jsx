@@ -959,12 +959,6 @@ export default function App() {
         }
       );
 
-      if (!responseText?.trim()) {
-        throw new Error(
-          'The server returned an empty answer. Check Vercel OPENAI_MODEL (use gpt-4o-mini) and OpenAI billing/credits.'
-        );
-      }
-
       const saved = await firestoreApi.saveResponse(userRef.current.uid, sessionRef.current.id, {
         prompt: text || questionText,
         response: responseText,
@@ -1356,7 +1350,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share the Meet tab, a Window, or Entire Screen with audio enabled'
+                : 'Capture Meet audio — share a Window with audio (not a Chrome tab)'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
@@ -1420,7 +1414,7 @@ export default function App() {
                   ? (voiceStatusHint || 'System Listen is active — listening for real interview questions from shared audio.')
                   : isMicListening
                     ? 'Listen is active — speak into your microphone. Response is generated automatically after a short pause.'
-                    : 'Click Listen for microphone, or System Listen and share a tab/window/screen with audio enabled (Google Meet, YouTube, etc.).'}
+                    : 'Click Listen for microphone, or System Listen and share a window/screen with audio enabled (Google Meet, YouTube, etc.).'}
               </div>
             )}
             {streamingResponse && (

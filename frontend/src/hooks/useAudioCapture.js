@@ -298,14 +298,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
       recorder.onstop = () => {
         enqueueRecording();
-        if (listeningRef.current && mediaRecorderRef.current === recorder && recorder.state === 'inactive') {
-          try {
-            segmentChunksRef.current = [];
-            recorder.start(RECORDER_TIMESLICE_MS);
-          } catch {
-            /* ignore */
-          }
-        }
       };
 
       mediaRecorderRef.current = recorder;
@@ -362,6 +354,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
+          displaySurface: 'window',
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 5 },
@@ -375,6 +368,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
         preferCurrentTab: false,
         selfBrowserSurface: 'exclude',
         systemAudio: 'include',
+        surfaceSwitching: 'exclude',
         monitorTypeSurfaces: 'include',
       });
     } catch (err) {
@@ -386,7 +380,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (!audioTracks.length) {
       displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No audio detected.\n\nShare a Chrome tab, Window, or Entire Screen and enable audio (Share tab audio / Share system audio).'
+        'No audio detected.\n\nChoose a Window (with audio enabled). Do not pick a Chrome tab — that avoids the "Sharing tab to..." banner on Meet.'
       );
       return;
     }
