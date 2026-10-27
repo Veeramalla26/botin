@@ -92,7 +92,11 @@ export async function transcribeAudio(blob, mimeType = 'audio/webm') {
     }
 
     const data = await res.json();
-    return data.text || '';
+    return {
+      text: data.text || '',
+      clarity: data.clarity || 'clear',
+      heard: data.heard || '',
+    };
   } finally {
     clearTimeout(timeout);
   }

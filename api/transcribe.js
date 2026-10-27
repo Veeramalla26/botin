@@ -1,5 +1,9 @@
+const { assessTranscription, supportsLogprobs } = require('./lib/transcriptClarity');
+
 const FAST_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 const FALLBACK_TRANSCRIBE_MODEL = 'whisper-1';
+
+let logprobsRejected = false;
 
 function applyCors(res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -11,7 +15,7 @@ function applyCors(res) {
   );
 }
 
-function buildForm(bytes, filename, contentType, model) {
+function buildForm(bytes, filename, contentType, model, withLogprobs) {
   const formData = new FormData();
   if (typeof File !== 'undefined') {
     formData.append('file', new File([bytes], filename, { type: contentType }));
@@ -20,8 +24,12 @@ function buildForm(bytes, filename, contentType, model) {
   }
   formData.append('model', model);
   formData.append('language', 'en');
-  formData.append('response_format', 'json');
+  // whisper-1 only reports per-segment no-speech and confidence scores in verbose_json.
+  formData.append('response_format', model === FALLBACK_TRANSCRIBE_MODEL ? 'verbose_json' : 'json');
   formData.append('temperature', '0');
+  if (withLogprobs) {
+    formData.append('include[]', 'logprobs');
+  }
   const vocabHint = (process.env.WHISPER_PROMPT || '').trim();
   if (vocabHint) {
     formData.append('prompt', vocabHint);
@@ -38,16 +46,34 @@ function shouldFallbackModel(status, body) {
   );
 }
 
-async function transcribeBuffer(bytes, filename, contentType, model) {
+function rejectedLogprobs(status, body) {
+  const msg = String(body || '').toLowerCase();
+  return status === 400 && (msg.includes('logprobs') || msg.includes('include'));
+}
+
+async function postTranscription(bytes, filename, contentType, model, withLogprobs) {
   const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
     },
-    body: buildForm(bytes, filename, contentType, model),
+    body: buildForm(bytes, filename, contentType, model, withLogprobs),
   });
   const body = await response.text();
   return { response, body };
+}
+
+async function transcribeBuffer(bytes, filename, contentType, model) {
+  const withLogprobs = !logprobsRejected && supportsLogprobs(model);
+  let result = await postTranscription(bytes, filename, contentType, model, withLogprobs);
+
+  if (withLogprobs && !result.response.ok && rejectedLogprobs(result.response.status, result.body)) {
+    console.warn(`Transcribe model "${model}" rejected logprobs; transcribing without confidence scores`);
+    logprobsRejected = true;
+    result = await postTranscription(bytes, filename, contentType, model, false);
+  }
+
+  return result;
 }
 
 module.exports = async (req, res) => {
@@ -101,7 +127,8 @@ module.exports = async (req, res) => {
     } catch {
       data = { text: body };
     }
-    const text = (data.text || '').trim();
+    const heard = (data.text || '').trim();
+    const { text, clarity, avgLogprob } = assessTranscription(data);
     const wordCount = text.split(/\s+/).filter(Boolean).length;
     if (wordCount >= 10 && buffer.length / wordCount < 320) {
       console.warn('Skipping likely transcribe hallucination', {
@@ -111,7 +138,11 @@ module.exports = async (req, res) => {
       });
       return res.status(200).json({ text: '' });
     }
-    return res.status(200).json({ text });
+    if (clarity === 'garbled') {
+      console.warn('Skipping garbled transcription', { avgLogprob, text: heard.slice(0, 120) });
+      return res.status(200).json({ text: '', clarity: 'garbled', heard });
+    }
+    return res.status(200).json({ text, clarity });
   } catch (err) {
     console.error('Transcribe API error:', err);
     return res.status(500).json({ error: err.message || 'Failed to transcribe audio' });

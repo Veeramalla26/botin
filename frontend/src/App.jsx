@@ -12,6 +12,7 @@ import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
 import {
   shouldProcessVoiceTranscript,
+  classifyVoicePrompt,
   isVoiceContinuation,
   mergeVoiceTranscripts,
   looksIncompleteQuestion,
@@ -1058,13 +1059,20 @@ export default function App() {
     voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, incomplete ? 500 : 60);
   }, [flushVoicePrompt]);
 
-  const handleVoiceTranscript = useCallback((text, { systemListen = false } = {}) => {
+  const handleVoiceTranscript = useCallback((text, { systemListen = false, clarity = 'clear' } = {}) => {
     if (!sessionRef.current || !userRef.current) return;
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
-    if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) {
+    if (!shouldProcessVoiceTranscript(cleaned, { systemListen, clarity })) {
       console.info('[voice] skipped noise:', cleaned);
+      return;
+    }
+
+    // System Listen hears the whole meeting, so only questions for the candidate start an answer.
+    const promptKind = systemListen ? classifyVoicePrompt(cleaned) : 'question';
+    if (promptKind === 'chatter') {
+      console.info('[voice] skipped small talk:', cleaned);
       return;
     }
 
@@ -1081,6 +1089,11 @@ export default function App() {
 
     if ((loadingRef.current || isGeneratingRef.current) && askedRecently && isVoiceContinuation(lastAsked, cleaned)) {
       lastSubmittedVoiceRef.current.text = mergeVoiceTranscripts(lastAsked, cleaned);
+      return;
+    }
+
+    if (promptKind !== 'question') {
+      console.info('[voice] skipped non-question:', cleaned);
       return;
     }
 

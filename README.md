@@ -83,6 +83,8 @@ npm run dev
 
 Open in **Chrome or Edge** for voice detection.
 
+After changing which voice transcripts get auto-answered, run `node scripts/test-voice-filter.mjs`.
+
 ---
 
 ## Deploy to Vercel
