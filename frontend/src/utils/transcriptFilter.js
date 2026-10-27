@@ -335,6 +335,69 @@ export function mergeVoiceTranscripts(previous, next) {
   return `${prev} ${nxt}`.replace(/\s+/g, ' ');
 }
 
+const TECH_TERMS = new Set([
+  'python',
+  'java',
+  'javascript',
+  'typescript',
+  'react',
+  'node',
+  'nodejs',
+  'sql',
+  'sap',
+  'html',
+  'css',
+  'aws',
+  'docker',
+  'kubernetes',
+  'linux',
+  'git',
+  'api',
+  'rest',
+  'graphql',
+  'mongodb',
+  'mysql',
+  'postgres',
+  'redis',
+  'angular',
+  'vue',
+  'express',
+  'django',
+  'flask',
+  'abap',
+  'oops',
+  'oop',
+  'rbac',
+  'palindrome',
+  'hashmap',
+  'array',
+]);
+
+function hasInterviewSignal(text, normalized) {
+  if (hasQuestionIntent(text, normalized)) return true;
+  if (normalized.split(' ').some((word) => TECH_TERMS.has(word))) return true;
+  return /\b(yourself|experience|background|project|projects|strength|weakness|challenge|database|cloud|design|complexity|palindrome|bubble|binary|oops|solid)\b/.test(
+    normalized
+  );
+}
+
+function looksLikeGibberish(normalized) {
+  const words = normalized.split(' ').filter((word) => word.length >= 5);
+  if (!words.length) return false;
+  let bad = 0;
+  for (const word of words) {
+    if (TECH_TERMS.has(word)) continue;
+    if (!/[aeiouy]/.test(word)) {
+      bad += 1;
+      continue;
+    }
+    if (/[bcdfghjklmnpqrstvwxz]{4,}/.test(word)) {
+      bad += 1;
+    }
+  }
+  return bad > 0 && bad >= Math.ceil(words.length / 2);
+}
+
 export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}) {
   if (isSpuriousTranscript(text)) {
     return false;
@@ -343,18 +406,21 @@ export function shouldProcessVoiceTranscript(text, { systemListen = false } = {}
   const normalized = normalizeTranscript(text);
   const wordCount = normalized.split(' ').filter(Boolean).length;
 
-  if (wordCount >= 2) {
-    return true;
-  }
-
-  // Allow a single technical term ("Python", "React") but not filler already in SPURIOUS_PHRASES.
-  if (wordCount === 1 && normalized.length >= 4) {
-    return true;
-  }
-
-  if (systemListen) {
+  if (looksLikeGibberish(normalized)) {
     return false;
   }
 
-  return normalized.length >= 3;
+  if (wordCount === 1) {
+    return TECH_TERMS.has(normalized);
+  }
+
+  if (systemListen && wordCount < 4 && !hasInterviewSignal(text, normalized)) {
+    return false;
+  }
+
+  if (!systemListen && wordCount < 2) {
+    return false;
+  }
+
+  return true;
 }
