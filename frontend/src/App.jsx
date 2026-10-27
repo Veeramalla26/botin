@@ -10,13 +10,7 @@ import StealthOverlay from './components/StealthOverlay';
 import FloatingResponsePanel from './components/FloatingResponsePanel';
 import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
-import {
-  shouldProcessVoiceTranscript,
-  classifyVoicePrompt,
-  isVoiceContinuation,
-  mergeVoiceTranscripts,
-  looksIncompleteQuestion,
-} from './utils/transcriptFilter';
+import { shouldProcessVoiceTranscript } from './utils/transcriptFilter';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
 import './App.css';
 
@@ -658,9 +652,6 @@ export default function App() {
   const resetTranscriptRef = useRef(() => {});
   const stopListeningRef = useRef(() => {});
   const pendingVoiceTranscriptRef = useRef(null);
-  const voiceGatherTimerRef = useRef(null);
-  const voiceGatherStartedAtRef = useRef(0);
-  const lastSubmittedVoiceRef = useRef({ text: '', at: 0 });
   const responsesRef = useRef([]);
   const lastResponseRef = useRef(null);
   const isFloatOpenRef = useRef(false);
@@ -968,10 +959,6 @@ export default function App() {
         }
       );
 
-      if (!responseText?.trim()) {
-        throw new Error('The server returned an empty answer. Tap Send to retry.');
-      }
-
       const saved = await firestoreApi.saveResponse(userRef.current.uid, sessionRef.current.id, {
         prompt: text || questionText,
         response: responseText,
@@ -1019,108 +1006,29 @@ export default function App() {
       }
 
       const pending = pendingVoiceTranscriptRef.current;
-      if (pending?.text && !voiceGatherTimerRef.current) {
-        const justAsked = lastSubmittedVoiceRef.current.text;
-        if (isVoiceContinuation(justAsked, pending.text) || isVoiceContinuation(pending.text, justAsked)) {
-          pendingVoiceTranscriptRef.current = null;
-        } else {
-          pendingVoiceTranscriptRef.current = null;
-          lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
+      if (pending) {
+        pendingVoiceTranscriptRef.current = null;
+        if (shouldProcessVoiceTranscript(pending.text, { systemListen: pending.systemListen })) {
           handleGenerate('send', pending.text);
         }
       }
     }
   };
 
-  const flushVoicePrompt = useCallback(() => {
-    voiceGatherTimerRef.current = null;
-    const pending = pendingVoiceTranscriptRef.current;
-    if (!pending?.text) return;
-
-    if (looksIncompleteQuestion(pending.text) && Date.now() - voiceGatherStartedAtRef.current < 1600) {
-      voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, 400);
-      return;
-    }
-
-    if (loadingRef.current || isGeneratingRef.current) {
-      return;
-    }
-
-    pendingVoiceTranscriptRef.current = null;
-    lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
-    handleGenerate('send', pending.text);
-  }, []);
-
-  const scheduleVoiceFlush = useCallback(() => {
-    if (voiceGatherTimerRef.current) {
-      clearTimeout(voiceGatherTimerRef.current);
-    }
-    const incomplete = looksIncompleteQuestion(pendingVoiceTranscriptRef.current?.text || '');
-    voiceGatherTimerRef.current = setTimeout(flushVoicePrompt, incomplete ? 500 : 60);
-  }, [flushVoicePrompt]);
-
-  const handleVoiceTranscript = useCallback((text, { systemListen = false, clarity = 'clear' } = {}) => {
+  const handleVoiceTranscript = useCallback((text, { systemListen = false } = {}) => {
     if (!sessionRef.current || !userRef.current) return;
 
     const cleaned = text.trim();
     if (cleaned.length < 3) return;
-    if (!shouldProcessVoiceTranscript(cleaned, { systemListen, clarity })) {
-      console.info('[voice] skipped noise:', cleaned);
-      return;
-    }
-
-    // System Listen hears the whole meeting, so only questions for the candidate start an answer.
-    const promptKind = systemListen ? classifyVoicePrompt(cleaned) : 'question';
-    if (promptKind === 'chatter') {
-      console.info('[voice] skipped small talk:', cleaned);
-      return;
-    }
-
-    const pending = pendingVoiceTranscriptRef.current;
-    const lastAsked = lastSubmittedVoiceRef.current.text;
-    const askedRecently = Date.now() - lastSubmittedVoiceRef.current.at < 8000;
-
-    if (pending && (isVoiceContinuation(pending.text, cleaned) || looksIncompleteQuestion(pending.text))) {
-      pending.text = mergeVoiceTranscripts(pending.text, cleaned);
-      pending.systemListen = systemListen;
-      scheduleVoiceFlush();
-      return;
-    }
-
-    if ((loadingRef.current || isGeneratingRef.current) && askedRecently && isVoiceContinuation(lastAsked, cleaned)) {
-      lastSubmittedVoiceRef.current.text = mergeVoiceTranscripts(lastAsked, cleaned);
-      return;
-    }
-
-    if (promptKind !== 'question') {
-      console.info('[voice] skipped non-question:', cleaned);
-      return;
-    }
+    if (!shouldProcessVoiceTranscript(cleaned, { systemListen })) return;
 
     if (loadingRef.current || isGeneratingRef.current) {
       pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
       return;
     }
 
-    if (pending && !isVoiceContinuation(pending.text, cleaned) && !looksIncompleteQuestion(pending.text)) {
-      if (voiceGatherTimerRef.current) {
-        clearTimeout(voiceGatherTimerRef.current);
-        voiceGatherTimerRef.current = null;
-      }
-      pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
-      voiceGatherStartedAtRef.current = Date.now();
-      lastSubmittedVoiceRef.current = { text: pending.text, at: Date.now() };
-      handleGenerate('send', pending.text);
-      scheduleVoiceFlush();
-      return;
-    }
-
-    if (!pending) {
-      voiceGatherStartedAtRef.current = Date.now();
-    }
-    pendingVoiceTranscriptRef.current = { text: cleaned, systemListen };
-    scheduleVoiceFlush();
-  }, [scheduleVoiceFlush]);
+    handleGenerate('send', cleaned);
+  }, []);
 
   const {
     hideApp,
@@ -1191,22 +1099,14 @@ export default function App() {
     resetTranscript,
   } = useAudioCapture({
     onFinalTranscript: handleVoiceTranscript,
-    micSilenceDelay: 380,
-    systemSilenceDelay: 480,
+    micSilenceDelay: 650,
+    systemSilenceDelay: 800,
   });
 
   resetTranscriptRef.current = resetTranscript;
   stopListeningRef.current = stopListening;
 
-  useEffect(
-    () => () => {
-      if (voiceGatherTimerRef.current) {
-        clearTimeout(voiceGatherTimerRef.current);
-      }
-      stopListeningRef.current();
-    },
-    []
-  );
+  useEffect(() => () => stopListeningRef.current(), []);
 
   const handleFixedQuestion = async (question) => {
     setShowFixedModal(false);
@@ -1450,7 +1350,7 @@ export default function App() {
             title={
               isSystemListening
                 ? 'Stop system audio'
-                : 'Capture Meet audio — share the Meet tab, a Window, or Entire Screen with audio enabled'
+                : 'Capture Meet audio — share a Window with audio (not a Chrome tab)'
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}

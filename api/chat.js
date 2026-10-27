@@ -1,13 +1,12 @@
 const { createOpenAI } = require('@ai-sdk/openai');
-const { streamText, generateText } = require('ai');
+const { streamText } = require('ai');
 const { MODE_PROMPTS, buildUserMessage, inferMode, isFollowUpQuestion } = require('./lib/prompts');
-const { resolveOpenAIModel, extractErrorMessage } = require('./lib/openaiModel');
 
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function applyCors(res) {
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -15,39 +14,6 @@ function applyCors(res) {
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
-}
-
-function beginTextResponse(res) {
-  if (res.headersSent) return;
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('X-Accel-Buffering', 'no');
-}
-
-function writeText(res, chunk) {
-  const text = typeof chunk === 'string' ? chunk : String(chunk || '');
-  if (!text) return;
-  beginTextResponse(res);
-  res.write(text);
-  if (typeof res.flush === 'function') {
-    res.flush();
-  }
-}
-
-function modelParams({ systemPrompt, userMessage, temperature, maxTokens }) {
-  return {
-    model: openai(resolveOpenAIModel()),
-    system: systemPrompt,
-    prompt: userMessage,
-    temperature,
-    maxTokens,
-    maxRetries: 0,
-  };
-}
-
-module.exports = async (req, res) => {
-  applyCors(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -86,54 +52,22 @@ module.exports = async (req, res) => {
     });
 
     const maxTokens =
-      effectiveMode === 'brief' ? 280 : effectiveMode === 'code' ? 800 : effectiveMode === 'send' ? 380 : 650;
+      effectiveMode === 'brief' ? 350 : effectiveMode === 'code' ? 900 : effectiveMode === 'send' ? 500 : 800;
     const temperature = followUp ? 0.6 : effectiveMode === 'code' ? 0.65 : effectiveMode === 'brief' ? 0.75 : 0.82;
-    const params = modelParams({ systemPrompt, userMessage, temperature, maxTokens });
 
-    let started = false;
+    const result = streamText({
+      model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+      system: systemPrompt,
+      prompt: userMessage,
+      temperature,
+      maxTokens,
+    });
 
-    try {
-      const result = streamText(params);
-      for await (const delta of result.textStream) {
-        if (!delta) continue;
-        started = true;
-        writeText(res, delta);
-      }
-    } catch (streamErr) {
-      console.error('Chat stream error:', streamErr);
-    }
-
-    if (!started && !res.headersSent) {
-      try {
-        const generated = await generateText(params);
-        const text = (generated.text || '').trim();
-        if (!text) {
-          return res.status(500).json({
-            error: 'Model returned no output. Set Vercel OPENAI_MODEL to gpt-4o-mini and check OpenAI credits.',
-          });
-        }
-        writeText(res, text);
-        started = true;
-      } catch (genErr) {
-        console.error('Chat generate error:', genErr);
-        return res.status(500).json({ error: extractErrorMessage(genErr) });
-      }
-    }
-
-    if (!started && !res.headersSent) {
-      return res.status(500).json({ error: extractErrorMessage(null) });
-    }
-
-    if (!res.writableEnded) {
-      res.end();
-    }
+    result.pipeTextStreamToResponse(res);
   } catch (err) {
     console.error('Chat API error:', err);
     if (!res.headersSent) {
-      return res.status(500).json({ error: extractErrorMessage(err) });
-    }
-    if (!res.writableEnded) {
-      res.end();
+      return res.status(500).json({ error: err.message || 'Failed to generate response' });
     }
   }
 };

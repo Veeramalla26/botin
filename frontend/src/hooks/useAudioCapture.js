@@ -6,20 +6,12 @@ const MIC_ARM_THRESHOLD = 0.006;
 const MIC_SPEECH_THRESHOLD = 0.011;
 const SYSTEM_ARM_THRESHOLD = 0.005;
 const SYSTEM_SPEECH_THRESHOLD = 0.008;
-const CHECK_INTERVAL_MS = 32;
-// Time above the speech level a clip needs; clicks, taps and desk bumps stay under it.
-const MIN_VOICED_MS = 160;
-// Background tabs can tick slowly; one tick never counts for more voiced time than this.
-const MAX_TICK_VOICED_MS = 250;
-// Quiet kept in front of speech. Longer pauses (e.g. while the candidate answers) are dropped
-// instead of being uploaded and transcribed together with the next question.
-const MAX_IDLE_RECORDING_MS = 3000;
-const IDLE_RESTART_QUIET_MS = 400;
+const CHECK_INTERVAL_MS = 40;
+const MIN_SPEECH_MS = 550;
 const MIN_TEXT_LENGTH = 3;
 const SYSTEM_GAIN = 2.5;
-const RECORDER_BITRATE = 24000;
-const RECORDER_TIMESLICE_MS = 80;
-const MAX_TRANSCRIBE_IN_FLIGHT = 2;
+const RECORDER_BITRATE = 64000;
+const RECORDER_TIMESLICE_MS = 100;
 
 function getSupportedMimeType() {
   if (typeof MediaRecorder === 'undefined') return null;
@@ -64,20 +56,13 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
   const modeRef = useRef('');
   const listeningRef = useRef(false);
   const isSpeakingRef = useRef(false);
-  const voicedMsRef = useRef(0);
-  const lastTickAtRef = useRef(0);
-  const lastVoicedAtRef = useRef(0);
-  const recorderStartedAtRef = useRef(0);
-  const recorderStoppingRef = useRef(false);
+  const speechStartedAtRef = useRef(0);
   const silenceStartedAtRef = useRef(null);
   const processingRef = useRef(false);
   const skipProcessRef = useRef(false);
   const silenceDelayRef = useRef(micSilenceDelay);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const transcriptionQueueRef = useRef([]);
-  const transcribeJobsRef = useRef([]);
-  const transcribeInFlightRef = useRef(0);
-  const deliveringRef = useRef(false);
   const lastProcessedTranscriptRef = useRef({ normalized: '', at: 0 });
 
   useEffect(() => {
@@ -100,29 +85,11 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     return { arm: MIC_ARM_THRESHOLD, speech: MIC_SPEECH_THRESHOLD };
   }, []);
 
-  const startRecorder = useCallback((recorder) => {
-    segmentChunksRef.current = [];
-    recorder.start(RECORDER_TIMESLICE_MS);
-    recorderStartedAtRef.current = Date.now();
-  }, []);
-
   const armRecorder = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    // While a stop is pending, onstop restarts the recorder; starting here would mix two clips.
-    if (recorder && recorder.state === 'inactive' && !recorderStoppingRef.current) {
-      startRecorder(recorder);
-    }
-  }, [startRecorder]);
-
-  const stopRecorder = useCallback((discard) => {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== 'recording') return;
-    skipProcessRef.current = discard;
-    recorderStoppingRef.current = true;
-    try {
-      recorder.stop();
-    } catch {
-      recorderStoppingRef.current = false;
+    if (recorder && recorder.state === 'inactive') {
+      segmentChunksRef.current = [];
+      recorder.start(RECORDER_TIMESLICE_MS);
     }
   }, []);
 
@@ -141,11 +108,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       }
     }
     mediaRecorderRef.current = null;
-    skipProcessRef.current = false;
-    recorderStoppingRef.current = false;
-    voicedMsRef.current = 0;
-    lastTickAtRef.current = 0;
-    lastVoicedAtRef.current = 0;
 
     streamsRef.current.forEach((stream) => {
       stream.getTracks().forEach((track) => track.stop());
@@ -160,10 +122,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     activeAnalyserRef.current = null;
     segmentChunksRef.current = [];
     transcriptionQueueRef.current = [];
-    transcribeJobsRef.current = [];
-    transcribeInFlightRef.current = 0;
-    deliveringRef.current = false;
-    processingRef.current = false;
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
     listeningRef.current = false;
@@ -176,104 +134,55 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     lastProcessedTranscriptRef.current = { normalized: '', at: 0 };
   }, []);
 
-  const showListeningHint = useCallback(() => {
-    if (listeningRef.current && !transcribeJobsRef.current.length && !transcriptionQueueRef.current.length) {
-      setStatusHint(
-        modeRef.current === 'system'
-          ? 'Listening for interview questions...'
-          : 'Listening to microphone...'
-      );
-    }
-  }, []);
+  const drainTranscriptionQueue = useCallback(async () => {
+    if (processingRef.current) return;
 
-  const deliverNextTranscript = useCallback(async () => {
-    if (deliveringRef.current) return;
-    deliveringRef.current = true;
+    const webmBlob = transcriptionQueueRef.current.shift();
+    if (!webmBlob) return;
+
+    processingRef.current = true;
 
     try {
-      while (transcribeJobsRef.current.length) {
-        const job = transcribeJobsRef.current[0];
-        const result = await job;
-        transcribeJobsRef.current.shift();
-
-        if (!result.ok) {
-          console.error('Audio transcription error:', result.error);
-          setStatusHint('Transcription failed — still listening...');
-        } else {
-          const { text, clarity } = result;
-          if (!text && result.heard) {
-            console.info('[voice] skipped unclear audio:', result.heard);
-          }
-          const wordCount = text.split(/\s+/).filter(Boolean).length;
-          if (wordCount >= 10 && result.bytes && result.bytes / wordCount < 320) {
-            console.info('[voice] skipped likely hallucination:', text);
-            continue;
-          }
-          const systemListen = modeRef.current === 'system';
-          const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
-          const now = Date.now();
-          const isDuplicate =
-            normalized &&
-            normalized === lastProcessedTranscriptRef.current.normalized &&
-            now - lastProcessedTranscriptRef.current.at < 12000;
-
-          if (text.length >= MIN_TEXT_LENGTH && !isDuplicate && onFinalTranscriptRef.current) {
-            if (!shouldProcessVoiceTranscript(text, { systemListen, clarity })) {
-              console.info('[voice] skipped noise:', text);
-            } else {
-              lastProcessedTranscriptRef.current = { normalized, at: now };
-              onFinalTranscriptRef.current(text, { systemListen, clarity });
-            }
-          }
-        }
-
-        if (
-          transcriptionQueueRef.current.length &&
-          transcribeInFlightRef.current < MAX_TRANSCRIBE_IN_FLIGHT
-        ) {
-          drainTranscriptionQueue();
-        }
-      }
-    } finally {
-      deliveringRef.current = false;
-      showListeningHint();
-    }
-  }, [showListeningHint]);
-
-  const drainTranscriptionQueue = useCallback(() => {
-    while (
-      transcriptionQueueRef.current.length &&
-      transcribeInFlightRef.current < MAX_TRANSCRIBE_IN_FLIGHT
-    ) {
-      const webmBlob = transcriptionQueueRef.current.shift();
-      if (!webmBlob) break;
-
-      transcribeInFlightRef.current += 1;
       setStatusHint('Transcribing...');
-      const job = transcribeAudio(webmBlob, 'audio/webm')
-        .then(({ text, clarity, heard }) => ({
-          ok: true,
-          text: (text || '').trim(),
-          clarity,
-          heard,
-          bytes: webmBlob.size,
-        }))
-        .catch((error) => ({ ok: false, error }))
-        .finally(() => {
-          transcribeInFlightRef.current = Math.max(0, transcribeInFlightRef.current - 1);
-          drainTranscriptionQueue();
-        });
-      transcribeJobsRef.current.push(job);
-    }
+      const text = (await transcribeAudio(webmBlob, 'audio/webm')).trim();
+      const systemListen = modeRef.current === 'system';
+      const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
+      const now = Date.now();
+      const isDuplicate =
+        normalized &&
+        normalized === lastProcessedTranscriptRef.current.normalized &&
+        now - lastProcessedTranscriptRef.current.at < 30000;
 
-    deliverNextTranscript();
-  }, [deliverNextTranscript]);
+      if (
+        text.length >= MIN_TEXT_LENGTH &&
+        !isDuplicate &&
+        shouldProcessVoiceTranscript(text, { systemListen }) &&
+        onFinalTranscriptRef.current
+      ) {
+        lastProcessedTranscriptRef.current = { normalized, at: now };
+        onFinalTranscriptRef.current(text, { systemListen });
+      }
+    } catch (err) {
+      console.error('Audio transcription error:', err);
+      setStatusHint('Transcription failed — still listening...');
+    } finally {
+      processingRef.current = false;
+      if (transcriptionQueueRef.current.length) {
+        drainTranscriptionQueue();
+      } else if (listeningRef.current) {
+        setStatusHint(
+          modeRef.current === 'system'
+            ? 'Listening for interview questions...'
+            : 'Listening to microphone...'
+        );
+      }
+    }
+  }, []);
 
   const enqueueRecording = useCallback(() => {
     if (skipProcessRef.current) {
       skipProcessRef.current = false;
       segmentChunksRef.current = [];
-      showListeningHint();
       return;
     }
 
@@ -286,20 +195,33 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
     transcriptionQueueRef.current.push(webmBlob);
     drainTranscriptionQueue();
-  }, [drainTranscriptionQueue, showListeningHint]);
+  }, [drainTranscriptionQueue]);
 
   const finishSpeechSegment = useCallback(() => {
-    const voicedMs = voicedMsRef.current;
+    const duration = Date.now() - speechStartedAtRef.current;
     isSpeakingRef.current = false;
     silenceStartedAtRef.current = null;
-    voicedMsRef.current = 0;
     setIsSpeaking(false);
-    // Clicks, taps and bumps cross the level for a moment but carry no words.
-    stopRecorder(voicedMs < MIN_VOICED_MS);
-  }, [stopRecorder]);
+
+    if (duration < MIN_SPEECH_MS) {
+      skipProcessRef.current = true;
+      segmentChunksRef.current = [];
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
 
   const startSpeechSegment = useCallback(() => {
     isSpeakingRef.current = true;
+    if (!speechStartedAtRef.current) {
+      speechStartedAtRef.current = Date.now();
+    }
     silenceStartedAtRef.current = null;
     setIsSpeaking(true);
     setStatusHint('Speech detected...');
@@ -310,9 +232,6 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     const level = getRmsVolume(activeAnalyserRef.current);
     if (!activeAnalyserRef.current) return;
 
-    const now = Date.now();
-    const tickMs = Math.min(now - (lastTickAtRef.current || now - CHECK_INTERVAL_MS), MAX_TICK_VOICED_MS);
-    lastTickAtRef.current = now;
     const { arm, speech } = getThresholds();
 
     if (level > arm) {
@@ -321,30 +240,15 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
 
     if (level > speech) {
       if (!isSpeakingRef.current) {
-        voicedMsRef.current = 0;
+        speechStartedAtRef.current = Date.now();
         startSpeechSegment();
       } else {
         silenceStartedAtRef.current = null;
       }
-      voicedMsRef.current += tickMs;
-      lastVoicedAtRef.current = now;
       return;
     }
 
-    if (!isSpeakingRef.current) {
-      const recorder = mediaRecorderRef.current;
-      if (
-        level <= arm &&
-        recorder?.state === 'recording' &&
-        !recorderStoppingRef.current &&
-        now - recorderStartedAtRef.current >= MAX_IDLE_RECORDING_MS &&
-        now - lastVoicedAtRef.current >= IDLE_RESTART_QUIET_MS
-      ) {
-        // Restart (and discard) during quiet so the next clip starts close to the speech.
-        stopRecorder(true);
-      }
-      return;
-    }
+    if (!isSpeakingRef.current) return;
 
     if (!silenceStartedAtRef.current) {
       silenceStartedAtRef.current = Date.now();
@@ -354,7 +258,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (Date.now() - silenceStartedAtRef.current >= silenceDelayRef.current) {
       finishSpeechSegment();
     }
-  }, [armRecorder, finishSpeechSegment, getThresholds, startSpeechSegment, stopRecorder]);
+  }, [armRecorder, finishSpeechSegment, getThresholds, startSpeechSegment]);
 
   const connectStream = useCallback((audioContext, stream, destination, analyser, gainValue = 1) => {
     const source = audioContext.createMediaStreamSource(stream);
@@ -387,43 +291,24 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
       });
 
       recorder.ondataavailable = (event) => {
-        if (mediaRecorderRef.current !== recorder) return;
         if (event.data.size > 0) {
           segmentChunksRef.current.push(event.data);
         }
       };
 
       recorder.onstop = () => {
-        // After cleanup() this recorder's last chunks belong to no clip.
-        if (mediaRecorderRef.current !== recorder) return;
-        recorderStoppingRef.current = false;
         enqueueRecording();
-        if (listeningRef.current && recorder.state === 'inactive') {
-          try {
-            startRecorder(recorder);
-          } catch {
-            /* ignore */
-          }
-        }
       };
 
       mediaRecorderRef.current = recorder;
-      skipProcessRef.current = false;
-      recorderStoppingRef.current = false;
       checkIntervalRef.current = setInterval(monitorAudio, CHECK_INTERVAL_MS);
       listeningRef.current = true;
       modeRef.current = mode;
       silenceDelayRef.current = mode === 'system' ? systemSilenceDelay : micSilenceDelay;
       setCaptureMode(mode);
       setStatusHint(statusMessage);
-      try {
-        // Record from the start so the first question keeps its opening words.
-        startRecorder(recorder);
-      } catch {
-        /* armRecorder starts it when sound arrives */
-      }
     },
-    [connectStream, micSilenceDelay, monitorAudio, enqueueRecording, startRecorder, systemSilenceDelay]
+    [connectStream, micSilenceDelay, monitorAudio, enqueueRecording, systemSilenceDelay]
   );
 
   const startMicListening = useCallback(async () => {
@@ -469,6 +354,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
+          displaySurface: 'window',
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 5 },
@@ -494,7 +380,7 @@ export function useAudioCapture({ onFinalTranscript, micSilenceDelay = 1100, sys
     if (!audioTracks.length) {
       displayStream.getTracks().forEach((track) => track.stop());
       alert(
-        'No audio detected.\n\nShare the Meet tab, a Window, or Entire Screen and enable audio (Share tab audio).'
+        'No audio detected.\n\nChoose a Window (with audio enabled). Do not pick a Chrome tab — that avoids the "Sharing tab to..." banner on Meet.'
       );
       return;
     }
