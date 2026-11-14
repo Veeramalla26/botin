@@ -841,7 +841,6 @@ export default function App() {
   }, [user, session]);
 
   const handleGenerateRef = useRef(null);
-  handleGenerateRef.current = handleGenerate;
 
   const handlePromptKeyDown = (e) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
@@ -1185,6 +1184,8 @@ export default function App() {
       onCancel: () => setConfirmDialog(null),
     });
   };
+
+  handleGenerateRef.current = handleGenerate;
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return undefined;
