@@ -1,3 +1,5 @@
+const { assessTranscription, supportsLogprobs } = require('./lib/transcriptClarity');
+
 const DEFAULT_TRANSCRIBE_MODELS = [
   'gpt-4o-mini-transcribe-2025-12-15',
   'gpt-4o-mini-transcribe',
@@ -32,24 +34,25 @@ function shouldTryNextModel(status, body) {
   return false;
 }
 
-function buildFormData(buffer, mimeType) {
+function buildFormData(buffer, mimeType, model) {
   const isWav = mimeType.includes('wav');
   const filename = isWav ? 'speech.wav' : 'speech.webm';
   const formData = new FormData();
   formData.append('file', new Blob([buffer], { type: isWav ? 'audio/wav' : mimeType }), filename);
   formData.append('language', 'en');
-  formData.append('response_format', 'json');
+  // whisper-1 only reports no-speech / confidence scores in verbose_json.
+  formData.append('response_format', model === 'whisper-1' ? 'verbose_json' : 'json');
   formData.append('temperature', '0');
-  formData.append(
-    'prompt',
-    process.env.WHISPER_PROMPT ||
-      'Job interview question. Technical terms: JavaScript, Python, React, Node.js, SAP, SQL, API, cloud, system design.'
-  );
+  if (supportsLogprobs(model)) formData.append('include[]', 'logprobs');
+  // No default vocabulary prompt: on background noise the model echoes it back as a
+  // fake "interview question". Only used if WHISPER_PROMPT is explicitly set.
+  const hint = (process.env.WHISPER_PROMPT || '').trim();
+  if (hint) formData.append('prompt', hint);
   return { formData, filename };
 }
 
 async function requestTranscription(buffer, mimeType, model) {
-  const { formData } = buildFormData(buffer, mimeType);
+  const { formData } = buildFormData(buffer, mimeType, model);
   formData.append('model', model);
 
   const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -62,6 +65,12 @@ async function requestTranscription(buffer, mimeType, model) {
 
   const body = await response.text();
   return { response, body };
+}
+
+// Catches the vocabulary-hint sentence being "transcribed" from noise.
+function isPromptEcho(text) {
+  return /technical terms.*(javascript|python|react|sap|sql)/i.test(text) ||
+    /^job interview question\.?$/i.test(text.trim());
 }
 
 module.exports = async (req, res) => {
@@ -111,8 +120,13 @@ module.exports = async (req, res) => {
         } catch {
           data = { text: body };
         }
-        const text = (data.text || '').trim();
-        return res.status(200).json({ text });
+        const heard = (data.text || '').trim();
+        const { text, clarity } = assessTranscription(data);
+        if (clarity === 'garbled' || isPromptEcho(text)) {
+          console.warn('Skipping noisy transcription', { text: heard.slice(0, 120) });
+          return res.status(200).json({ text: '', clarity: 'garbled', heard });
+        }
+        return res.status(200).json({ text, clarity });
       }
 
       lastResponse = response;
