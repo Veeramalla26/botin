@@ -22,6 +22,16 @@ function notifyExplicitPanelClose() {
   }
 }
 
+function notifySendPrompt(text) {
+  try {
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    channel.postMessage({ type: 'send-prompt', text });
+    channel.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 function notifyClearResponses() {
   try {
     const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -55,11 +65,13 @@ export default function FloatingResponsePanel({
   onSetMinimized,
   onClose,
   onClearResponses,
+  onSendPrompt,
   isPopoutWindow = false,
   isMinimized: controlledMinimized,
   dragWindow = null,
 }) {
   const [localMinimized, setLocalMinimized] = useState(false);
+  const [draft, setDraft] = useState('');
   const minimized = controlledMinimized ?? localMinimized;
 
   const targetWindow = dragWindow || (isPopoutWindow ? window : null);
@@ -96,6 +108,23 @@ export default function FloatingResponsePanel({
       onClearResponses?.();
     }
   }, [isPopoutWindow, onClearResponses]);
+
+  const handleSendDraft = useCallback(() => {
+    const text = draft.trim();
+    if (!text) return;
+    if (isPopoutWindow) {
+      notifySendPrompt(text);
+    } else {
+      onSendPrompt?.(text);
+    }
+    setDraft('');
+  }, [draft, isPopoutWindow, onSendPrompt]);
+
+  const handleDraftKeyDown = (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent?.isComposing) return;
+    e.preventDefault();
+    handleSendDraft();
+  };
 
   return (
     <div className={`float-panel${minimized ? ' minimized' : ''}`}>
@@ -160,6 +189,24 @@ export default function FloatingResponsePanel({
           )}
         </div>
         <div className="float-panel-footer">
+          <input
+            type="text"
+            className="float-panel-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleDraftKeyDown}
+            placeholder="Type a question..."
+            aria-label="Type a question"
+          />
+          <button
+            type="button"
+            className="float-panel-send"
+            onClick={handleSendDraft}
+            disabled={!draft.trim()}
+            title="Send"
+          >
+            Send
+          </button>
           <button
             type="button"
             className="float-panel-clear"
@@ -167,7 +214,7 @@ export default function FloatingResponsePanel({
             disabled={allItems.length === 0 && !loading}
             title="Clear all responses"
           >
-            Clear responses
+            Clear
           </button>
         </div>
         </>

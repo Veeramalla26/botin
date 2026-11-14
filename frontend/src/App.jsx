@@ -840,6 +840,9 @@ export default function App() {
     };
   }, [user, session]);
 
+  const handleGenerateRef = useRef(null);
+  handleGenerateRef.current = handleGenerate;
+
   const handlePromptKeyDown = (e) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
     e.preventDefault();
@@ -1191,6 +1194,9 @@ export default function App() {
       if (event.data?.type === 'clear-responses') {
         clearResponsesNow();
       }
+      if (event.data?.type === 'send-prompt' && typeof event.data.text === 'string') {
+        handleGenerateRef.current?.('send', event.data.text);
+      }
     };
 
     return () => channel.close();
@@ -1303,6 +1309,7 @@ export default function App() {
           onSetMinimized={setPanelMinimized}
           onClose={closeFloatPanel}
           onClearResponses={clearResponsesNow}
+          onSendPrompt={(text) => handleGenerate('send', text)}
           dragWindow={pipWindow}
         />
       )}

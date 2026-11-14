@@ -1737,13 +1737,47 @@ body.float-popout-minimized .app.float-window {
 .float-panel-footer {
   flex-shrink: 0;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.35rem 0.55rem 0.5rem;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
 }
 
+.float-panel-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: inherit;
+  outline: none;
+}
+
+.float-panel-input:focus {
+  border-color: #17a2b8;
+}
+
+.float-panel-send {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.38rem 0.85rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: #17a2b8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.float-panel-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .float-panel-clear {
+  flex-shrink: 0;
   font-size: 0.72rem;
   font-weight: 600;
   padding: 0.32rem 0.85rem;
