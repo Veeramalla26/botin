@@ -2,6 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App, { FloatWindowApp } from './App';
 import './index.css';
+import { applyStoredTheme } from './utils/theme';
+
+applyStoredTheme();
 
 const isFloat = new URLSearchParams(window.location.search).get('float') === '1';
 

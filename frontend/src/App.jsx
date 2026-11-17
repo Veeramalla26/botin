@@ -12,6 +12,7 @@ import * as firestoreApi from './services/firestore';
 import { streamChatResponse, buildHeading, parseResumeFile, RESUME_ACCEPT } from './services/api';
 import { shouldProcessVoiceTranscript } from './utils/transcriptFilter';
 import { FIXED_QUESTIONS } from './data/fixedQuestions';
+import { useTheme, applyTheme } from './utils/theme';
 import './App.css';
 
 function ConfigMissing() {
@@ -537,6 +538,7 @@ function ResponseItem({ item, onDelete, onAddToNotes, onCopy, isStreaming = fals
 
 function FloatWindowApp() {
   const { remoteState } = useResponseSync(false);
+  useTheme();
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -621,6 +623,7 @@ function isStaleOrphanDraft(draft) {
 
 export default function App() {
   const isPopout = new URLSearchParams(window.location.search).get('popout') === '1';
+  const { theme, toggleTheme } = useTheme();
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -1055,6 +1058,10 @@ export default function App() {
     pipWindow,
   } = useFloatingPanel({ enabled: !isPopout });
 
+  useEffect(() => {
+    if (pipWindow) applyTheme(theme, pipWindow.document);
+  }, [theme, pipWindow]);
+
   const toggleFloatPanel = useCallback(() => {
     if (isFloatOpenRef.current) {
       closeFloatPanel();
@@ -1362,6 +1369,15 @@ export default function App() {
             }
           >
             {isSystemListening ? '🔴 System Listen' : '🔊 System Listen'}
+          </button>
+          <button
+            type="button"
+            className="voice-btn theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
           </button>
           <UserMenu
             user={user}
