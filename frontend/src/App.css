@@ -45,6 +45,10 @@
   --color-code-bg: #f6f7f9;
   --color-code-border: #e8ebf0;
   --color-float-bg: rgba(255, 255, 255, 0.97);
+  --color-float-glass: rgba(244, 245, 248, 0.82);
+  --color-float-glass-strong: rgba(255, 255, 255, 0.78);
+  --color-float-card: rgba(255, 255, 255, 0.72);
+  --color-float-card-hover: rgba(255, 255, 255, 0.92);
   --color-scrollbar: #cdd2da;
   --focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.18);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
@@ -88,6 +92,10 @@
   --color-code-bg: #0d1016;
   --color-code-border: #252a34;
   --color-float-bg: rgba(20, 23, 31, 0.97);
+  --color-float-glass: rgba(11, 13, 18, 0.8);
+  --color-float-glass-strong: rgba(17, 20, 27, 0.78);
+  --color-float-card: rgba(28, 32, 42, 0.6);
+  --color-float-card-hover: rgba(34, 39, 50, 0.8);
   --color-scrollbar: #353b47;
   --focus-ring: 0 0 0 3px rgba(129, 140, 248, 0.3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -2035,4 +2043,76 @@ body.float-popout-minimized .app.float-window {
   font-size: 0.68rem;
   color: var(--color-text-muted);
   line-height: 1.35;
+}
+
+/* Floating panel: glass look, smoother motion, cheaper rendering.
+   Browser pop-up windows are opaque at OS level, so "transparent" is done with
+   translucent surfaces inside the window. */
+.float-panel {
+  background: var(--color-float-glass);
+  /* backdrop-filter has nothing to blur inside a separate window and costs GPU every frame */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  contain: layout paint;
+}
+
+.float-window-chrome {
+  background: var(--color-float-glass-strong);
+}
+
+.float-panel-feed {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  padding: 0.65rem;
+}
+
+.float-item {
+  background: var(--color-float-card);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 0.65rem;
+  box-shadow: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.float-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.float-item:hover {
+  background: var(--color-float-card-hover);
+}
+
+.float-item:not(.streaming) {
+  animation: floatItemIn 0.22s ease-out;
+}
+
+@keyframes floatItemIn {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+.float-panel-footer {
+  background: var(--color-float-glass-strong);
+}
+
+.float-panel-input,
+.float-panel-clear {
+  background: var(--color-float-card);
+}
+
+.float-win-btn,
+.float-panel-send,
+.float-panel-clear,
+.float-panel-input {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-panel-feed { scroll-behavior: auto; }
+  .float-item:not(.streaming) { animation: none; }
 }
